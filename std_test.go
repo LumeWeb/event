@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gookit/event"
 	"github.com/gookit/goutil/testutil/assert"
+	"go.lumeweb.com/event"
 )
 
-var emptyListener = func(e event.Event) error {
+var emptyListener = func(e event.Event[event.M]) error {
 	return nil
 }
 
@@ -20,7 +20,9 @@ func TestAddEvent(t *testing.T) {
 
 	// no name
 	assert.Panics(t, func() {
-		event.AddEvent(&event.BasicEvent{})
+		evt := event.NewBasic[event.M]("", event.M{})
+		evt.SetName("") // explicitly set empty name
+		event.AddEvent[event.M](evt)
 	})
 
 	_, ok := event.GetEvent("evt1")
@@ -28,9 +30,9 @@ func TestAddEvent(t *testing.T) {
 
 	// event.AddEvent
 	e := event.NewBasic("evt1", event.M{"k1": "inhere"})
-	event.AddEvent(e)
+	event.AddEvent[event.M](e)
 	// add by AttachTo
-	event.NewBasic("evt2", nil).AttachTo(event.Std())
+	event.NewMEvent("evt2", event.M{}).AttachTo(event.StdForType[event.M]())
 
 	assert.False(t, e.IsAborted())
 	assert.True(t, event.HasEvent("evt1"))
@@ -40,7 +42,13 @@ func TestAddEvent(t *testing.T) {
 	// event.GetEvent
 	r1, ok := event.GetEvent("evt1")
 	assert.True(t, ok)
-	assert.Equal(t, e, r1)
+	
+	// Handle case where event is wrapped in adapter
+	if adapter, ok := r1.(*event.EventTToAnyAdapter[event.M]); ok {
+		assert.Equal(t, e, adapter.OriginalEvent)
+	} else {
+		assert.Equal(t, e, r1)
+	}
 
 	// RemoveEvent
 	event.Std().RemoveEvent("evt2")
@@ -54,13 +62,13 @@ func TestAddEvent(t *testing.T) {
 func TestAddEventFc(t *testing.T) {
 	// clear all
 	event.Reset()
-	event.AddEvent(&testEvent{
+	event.AddEvent[event.M](&testEvent{
 		name: "evt1",
 	})
 	assert.True(t, event.HasEvent("evt1"))
 
-	event.AddEventFc("test", func() event.Event {
-		return event.NewBasic("test", nil)
+	event.AddEventFc("test", func() event.Event[any] {
+		return event.NewBasic[any]("test", nil)
 	})
 
 	assert.True(t, event.HasEvent("test"))
@@ -68,29 +76,29 @@ func TestAddEventFc(t *testing.T) {
 
 func TestFire(t *testing.T) {
 	buf := new(bytes.Buffer)
-	fn := func(e event.Event) error {
+	fn := func(e event.Event[event.M]) error {
 		_, _ = fmt.Fprintf(buf, "event: %s", e.Name())
 		return nil
 	}
 
-	event.On("evt1", event.ListenerFunc(fn), 0)
-	event.On("evt1", event.ListenerFunc(emptyListener), event.High)
+	event.On[event.M]("evt1", event.ListenerFunc[event.M](fn), 0)
+	event.On[event.M]("evt1", event.ListenerFunc[event.M](emptyListener), event.High)
 	assert.True(t, event.HasListeners("evt1"))
 
-	err, e := event.Fire("evt1", nil)
+	err, e := event.Fire[event.M]("evt1", event.M{})
 	assert.NoError(t, err)
 	assert.Equal(t, "evt1", e.Name())
 	assert.Equal(t, "event: evt1", buf.String())
 
-	event.NewBasic("evt2", nil).AttachTo(event.Std())
-	event.On("evt2", event.ListenerFunc(func(e event.Event) error {
+	event.NewBasic("evt2", event.M{}).AttachTo(&event.StdManagerAdapter[event.M]{Mgr: event.Std()})
+	event.On[event.M]("evt2", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		assert.Equal(t, "evt2", e.Name())
-		assert.Equal(t, "v", e.Get("k"))
+		assert.Equal(t, "v", e.Data()["k"])
 		return nil
 	}), event.AboveNormal)
 
 	assert.True(t, event.HasListeners("evt2"))
-	err, e = event.Trigger("evt2", event.M{"k": "v"})
+	err, e = event.Trigger[event.M]("evt2", event.M{"k": "v"})
 	assert.NoError(t, err)
 	assert.Equal(t, "evt2", e.Name())
 	assert.Equal(t, map[string]any{"k": "v"}, e.Data())
@@ -100,23 +108,23 @@ func TestFire(t *testing.T) {
 	assert.False(t, event.HasListeners("evt1"))
 	assert.False(t, event.HasListeners("evt2"))
 
-	err, e = event.Fire("not-exist", nil)
+	err, e = event.Fire("not-exist", event.M{})
 	assert.NoError(t, err)
 	assert.NotEmpty(t, e)
 }
 
 func TestAddSubscriber(t *testing.T) {
-	event.AddSubscriber(&testSubscriber{})
+	event.Std().Subscribe(&testSubscriber{})
 
 	assert.True(t, event.HasListeners("e1"))
 	assert.True(t, event.HasListeners("e2"))
 	assert.True(t, event.HasListeners("e3"))
 
-	ers := event.FireBatch("e1", event.NewBasic("e2", nil))
+	ers := event.FireBatch("e1", event.NewBasic("e2", event.M{}))
 	assert.Len(t, ers, 1)
 
 	assert.Panics(t, func() {
-		event.Subscribe(testSubscriber2{})
+		event.Subscribe[any](event.Std(), testSubscriber2{})
 	})
 
 	event.Reset()
@@ -126,31 +134,31 @@ func TestFireEvent(t *testing.T) {
 	defer event.Reset()
 	buf := new(bytes.Buffer)
 
-	evt1 := event.NewBasic("evt1", nil).Fill(nil, event.M{"n": "inhere"})
-	event.AddEvent(evt1)
+	evt1 := event.NewBasic("evt1", event.M{"n": "inhere"})
+	event.AddEvent[event.M](evt1)
 
 	assert.True(t, event.HasEvent("evt1"))
 	assert.False(t, event.HasEvent("not-exist"))
 
-	event.Listen("evt1", event.ListenerFunc(func(e event.Event) error {
-		_, _ = fmt.Fprintf(buf, "event: %s, params: n=%s", e.Name(), e.Get("n"))
+	event.Listen[event.M]("evt1", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+		_, _ = fmt.Fprintf(buf, "event: %s, params: n=%s", e.Name(), e.Data()["n"])
 		return nil
 	}), event.Normal)
 
 	assert.True(t, event.HasListeners("evt1"))
 	assert.False(t, event.HasListeners("not-exist"))
 
-	err := event.FireEvent(evt1)
+	err := event.FireEvent[event.M](evt1)
 	assert.NoError(t, err)
 	assert.Equal(t, "event: evt1, params: n=inhere", buf.String())
 	buf.Reset()
 
-	err = event.TriggerEvent(evt1)
+	err = event.TriggerEvent[event.M](evt1)
 	assert.NoError(t, err)
 	assert.Equal(t, "event: evt1, params: n=inhere", buf.String())
 	buf.Reset()
 
-	event.AsyncFire(evt1)
+	event.AsyncFire[event.M](evt1)
 	time.Sleep(time.Second)
 	assert.Equal(t, "event: evt1, params: n=inhere", buf.String())
 }
@@ -160,18 +168,21 @@ func TestAsync(t *testing.T) {
 	event.Config(event.UsePathMode)
 
 	buf := new(bytes.Buffer)
-	event.On("test", event.ListenerFunc(func(e event.Event) error {
+	event.On[event.M]("test", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		buf.WriteString("test:")
-		buf.WriteString(e.Get("key").(string))
+		buf.WriteString(fmt.Sprintf("%v", e.Data()["key"]))
 		buf.WriteString("|")
 		return nil
 	}))
 
 	event.Async("test", event.M{"key": "val1"})
 	te := &testEvent{name: "test", data: event.M{"key": "val2"}}
-	event.FireAsync(te)
+	event.FireAsync[event.M](te)
 
-	assert.NoError(t, event.CloseWait())
+	err := event.CloseWait()
+	if err != nil {
+		t.Errorf("CloseWait() returned error: %v", err)
+	}
 	s := buf.String()
 	assert.Contains(t, s, "test:val1|")
 	assert.Contains(t, s, "test:val2|")
@@ -180,20 +191,20 @@ func TestAsync(t *testing.T) {
 func TestFire_point_at_end(t *testing.T) {
 	// clear all
 	event.Reset()
-	event.Listen("db.*", event.ListenerFunc(func(e event.Event) error {
-		e.Set("key", "val")
+	event.Listen[event.M]("db.*", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+		e.SetData(event.M{"key": "val"})
 		return nil
 	}))
 
-	err, e := event.Fire("db.add", nil)
+	err, e := event.Fire[event.M]("db.add", event.M{})
 	assert.NoError(t, err)
-	assert.Equal(t, "val", e.Get("key"))
+	assert.Equal(t, "val", e.Data()["key"])
 
-	err, e = event.Fire("db", nil)
+	err, e = event.Fire("db", event.M{})
 	assert.NotEmpty(t, e)
 	assert.NoError(t, err)
 
-	err, e = event.Fire("db.", nil)
+	err, e = event.Fire("db.", event.M{})
 	assert.NotEmpty(t, e)
 	assert.NoError(t, err)
 }
@@ -202,7 +213,7 @@ func TestFire_notExist(t *testing.T) {
 	// clear all
 	event.Reset()
 
-	err, e := event.Fire("not-exist", nil)
+	err, e := event.Fire("not-exist", event.M{})
 	assert.NoError(t, err)
 	assert.NotEmpty(t, e)
 }
@@ -210,17 +221,17 @@ func TestFire_notExist(t *testing.T) {
 func TestMustFire(t *testing.T) {
 	defer event.Reset()
 
-	event.On("n1", event.ListenerFunc(func(e event.Event) error {
+	event.On[event.M]("n1", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		return fmt.Errorf("an error")
 	}), event.Max)
-	event.On("n2", event.ListenerFunc(emptyListener), event.Min)
+	event.On[event.M]("n2", event.ListenerFunc[event.M](emptyListener), event.Min)
 
 	assert.Panics(t, func() {
-		_ = event.MustFire("n1", nil)
+		_ = event.MustFire[event.M]("n1", event.M{})
 	})
 
 	assert.NotPanics(t, func() {
-		_ = event.MustTrigger("n2", nil)
+		_ = event.MustTrigger[event.M]("n2", event.M{})
 	})
 }
 
@@ -228,17 +239,17 @@ func TestOn(t *testing.T) {
 	defer event.Reset()
 
 	assert.Panics(t, func() {
-		event.On("", event.ListenerFunc(emptyListener), 0)
+		event.On[event.M]("", event.ListenerFunc[event.M](emptyListener), 0)
 	})
 	assert.Panics(t, func() {
-		event.On("name", nil, 0)
+		event.On[event.M]("name", nil, 0)
 	})
 	assert.Panics(t, func() {
-		event.On("++df", event.ListenerFunc(emptyListener), 0)
+		event.On[event.M]("++df", event.ListenerFunc[event.M](emptyListener), 0)
 	})
 
 	std := event.Std()
-	event.On("n1", event.ListenerFunc(emptyListener), event.Min)
+	event.On[event.M]("n1", event.ListenerFunc[event.M](emptyListener), event.Min)
 	assert.Equal(t, 1, std.ListenersCount("n1"))
 	assert.Equal(t, 0, std.ListenersCount("not-exist"))
 	assert.True(t, event.HasListeners("n1"))
@@ -253,8 +264,11 @@ func TestOn(t *testing.T) {
 func TestOnce(t *testing.T) {
 	defer event.Reset()
 
-	event.Once("evt1", event.ListenerFunc(emptyListener))
+	event.Once[event.M]("evt1", event.ListenerFunc[event.M](emptyListener))
 	assert.True(t, event.Std().HasListeners("evt1"))
-	event.Trigger("evt1", nil)
+	err, _ := event.Trigger[event.M]("evt1", event.M{})
+	if err != nil {
+		t.Error(err)
+	}
 	assert.False(t, event.Std().HasListeners("evt1"))
 }

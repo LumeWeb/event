@@ -6,33 +6,22 @@ import (
 )
 
 // Listener interface
-type Listener interface {
-	Handle(e Event) error
+type Listener[T any] interface {
+	Handle(e Event[T]) error
 }
 
 // ListenerFunc func definition.
-type ListenerFunc func(e Event) error
+type ListenerFunc[T any] func(e Event[T]) error
 
 // Handle event. implements the Listener interface
-func (fn ListenerFunc) Handle(e Event) error {
+func (fn ListenerFunc[T]) Handle(e Event[T]) error {
 	return fn(e)
 }
 
-// Subscriber event subscriber interface.
-//
-// you can register multi event listeners in a struct func.
-type Subscriber interface {
-	// SubscribedEvents register event listeners
-	//
-	//  - key: is event name. eg "user.created" "user.*" "user.**"
-	//  - value: can be Listener or ListenerItem interface
-	SubscribedEvents() map[string]any
-}
-
 // ListenerItem storage a event listener and it's priority value.
-type ListenerItem struct {
+type ListenerItem[T any] struct {
 	Priority int
-	Listener Listener
+	Listener Listener[T]
 }
 
 /*************************************************************
@@ -40,22 +29,22 @@ type ListenerItem struct {
  *************************************************************/
 
 // ListenerQueue storage sorted Listener instance.
-type ListenerQueue struct {
-	items []*ListenerItem
+type ListenerQueue[T any] struct {
+	items []*ListenerItem[T]
 }
 
 // Len get items length
-func (lq *ListenerQueue) Len() int {
+func (lq *ListenerQueue[T]) Len() int {
 	return len(lq.items)
 }
 
 // IsEmpty get items length == 0
-func (lq *ListenerQueue) IsEmpty() bool {
+func (lq *ListenerQueue[T]) IsEmpty() bool {
 	return len(lq.items) == 0
 }
 
 // Push get items length
-func (lq *ListenerQueue) Push(li *ListenerItem) *ListenerQueue {
+func (lq *ListenerQueue[T]) Push(li *ListenerItem[T]) *ListenerQueue[T] {
 	lq.items = append(lq.items, li)
 	return lq
 }
@@ -65,11 +54,11 @@ func (lq *ListenerQueue) Push(li *ListenerItem) *ListenerQueue {
 // Priority:
 //
 //	High > Low
-func (lq *ListenerQueue) Sort() *ListenerQueue {
+func (lq *ListenerQueue[T]) Sort() *ListenerQueue[T] {
 	// if lq.IsEmpty() {
 	// 	return lq
 	// }
-	ls := ByPriorityItems(lq.items)
+	ls := ByPriorityItems[T](lq.items)
 
 	// check items is sorted
 	if !sort.IsSorted(ls) {
@@ -80,26 +69,25 @@ func (lq *ListenerQueue) Sort() *ListenerQueue {
 }
 
 // Items get all ListenerItem
-func (lq *ListenerQueue) Items() []*ListenerItem {
+func (lq *ListenerQueue[T]) Items() []*ListenerItem[T] {
 	return lq.items
 }
 
 // Remove a listener from the queue
-func (lq *ListenerQueue) Remove(listener Listener) {
+func (lq *ListenerQueue[T]) Remove(listener Listener[T]) {
 	if listener == nil {
 		return
 	}
 
-	// unsafe.Pointer(listener)
-	ptrVal := getListenCompareKey(listener)
+	compareKey := getListenCompareKey(listener)
 
-	var newItems []*ListenerItem
+	var newItems []*ListenerItem[T]
 	for _, li := range lq.items {
-		liPtrVal := getListenCompareKey(li.Listener)
-		if liPtrVal == ptrVal {
-			continue
-		}
+		liKey := getListenCompareKey(li.Listener)
 
+		if reflect.DeepEqual(liKey, compareKey) {
+			continue // skip this listener (remove it)
+		}
 		newItems = append(newItems, li)
 	}
 
@@ -107,13 +95,20 @@ func (lq *ListenerQueue) Remove(listener Listener) {
 }
 
 // Clear all listeners
-func (lq *ListenerQueue) Clear() {
+func (lq *ListenerQueue[T]) Clear() {
 	lq.items = lq.items[:0]
 }
 
 // getListenCompareKey get listener compare key
-func getListenCompareKey(src Listener) reflect.Value {
-	return reflect.ValueOf(src)
+func getListenCompareKey[T any](src Listener[T]) any {
+	val := reflect.ValueOf(src)
+
+	// If it's a pointer to a struct, dereference it for comparison
+	if val.Kind() == reflect.Ptr && val.Elem().Kind() == reflect.Struct {
+		return val.Elem().Interface()
+	}
+
+	return val
 }
 
 /*************************************************************
@@ -121,19 +116,19 @@ func getListenCompareKey(src Listener) reflect.Value {
  *************************************************************/
 
 // ByPriorityItems type. implements the sort.Interface
-type ByPriorityItems []*ListenerItem
+type ByPriorityItems[T any] []*ListenerItem[T]
 
 // Len get items length
-func (ls ByPriorityItems) Len() int {
+func (ls ByPriorityItems[T]) Len() int {
 	return len(ls)
 }
 
 // Less implements the sort.Interface.Less.
-func (ls ByPriorityItems) Less(i, j int) bool {
+func (ls ByPriorityItems[T]) Less(i, j int) bool {
 	return ls[i].Priority > ls[j].Priority
 }
 
 // Swap implements the sort.Interface.Swap.
-func (ls ByPriorityItems) Swap(i, j int) {
+func (ls ByPriorityItems[T]) Swap(i, j int) {
 	ls[i], ls[j] = ls[j], ls[i]
 }

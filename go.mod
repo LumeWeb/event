@@ -1,4 +1,4 @@
-module github.com/gookit/event
+module go.lumeweb.com/event
 
 go 1.19
 
