@@ -3,12 +3,12 @@ package event_test
 import (
 	"testing"
 
-	"github.com/gookit/event"
+	"go.lumeweb.com/event"
 )
 
 func BenchmarkManager_Fire_no_listener(b *testing.B) {
-	em := event.NewManager("test")
-	em.On("app.up", event.ListenerFunc(func(e event.Event) error {
+	em := event.NewManager[any]("test")
+	em.On("app.up", event.ListenerFunc[any](func(e event.Event[any]) error {
 		return nil
 	}))
 
@@ -21,8 +21,8 @@ func BenchmarkManager_Fire_no_listener(b *testing.B) {
 }
 
 func BenchmarkManager_Fire_normal(b *testing.B) {
-	em := event.NewManager("test")
-	em.On("app.up", event.ListenerFunc(func(e event.Event) error {
+	em := event.NewManager[any]("test")
+	em.On("app.up", event.ListenerFunc[any](func(e event.Event[any]) error {
 		return nil
 	}))
 
@@ -35,8 +35,8 @@ func BenchmarkManager_Fire_normal(b *testing.B) {
 }
 
 func BenchmarkManager_Fire_wildcard(b *testing.B) {
-	em := event.NewManager("test")
-	em.On("app.*", event.ListenerFunc(func(e event.Event) error {
+	em := event.NewManager[any]("test")
+	em.On("app.*", event.ListenerFunc[any](func(e event.Event[any]) error {
 		return nil
 	}))
 

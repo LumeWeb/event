@@ -1,9 +1,10 @@
-package event
+package event_test
 
 import (
 	"testing"
 
 	"github.com/gookit/goutil/testutil/assert"
+	"go.lumeweb.com/event"
 )
 
 type globalTestVal struct {
@@ -15,24 +16,24 @@ type testListenerCalc struct {
 	owner *globalTestVal
 }
 
-func (l testListenerCalc) Handle(e Event) error {
+func (l testListenerCalc) Handle(e event.Event[int]) error {
 	l.owner.n++
-	l.owner.sum += l.bind
+	l.owner.sum += e.Data() + l.bind
 	return nil
 }
 
 func Test_RemoveListener(t *testing.T) {
 	t.Run("make func", func(t *testing.T) {
 		global := &globalTestVal{}
-		makeFn := func(a int) ListenerFunc {
-			return func(e Event) error {
+		makeFn := func(a int) event.ListenerFunc[int] {
+			return func(e event.Event[int]) error {
 				global.n++
-				global.sum += a
+				global.sum += e.Data() + a
 				return nil
 			}
 		}
 
-		evBus := NewManager("")
+		evBus := event.NewManager[int]("")
 		const evName = "ev1"
 
 		f1 := makeFn(11)
@@ -49,25 +50,25 @@ func Test_RemoveListener(t *testing.T) {
 		evBus.On(evName, p5)
 		evBus.On(evName, p6)
 
-		evBus.MustTrigger(evName, nil)
+		evBus.MustFire(evName, 0)
 		assert.Equal(t, global.n, 6)
 		assert.Equal(t, global.sum, 231) // 11+22+33+44+55+66=231
 
 		evBus.RemoveListener(evName, f2)
 		evBus.RemoveListener(evName, p5)
-		evBus.MustFire(evName, nil)
+		evBus.MustFire(evName, 0)
 		assert.Equal(t, global.n, 6+4)
 		assert.Equal(t, global.sum, 385) // 231+11+33+44+66=385
 
 		evBus.RemoveListener(evName, f1)
 		evBus.RemoveListener(evName, f1) // not exist function.
-		evBus.MustFire(evName, nil)
+		evBus.MustFire(evName, 0)
 		assert.Equal(t, global.n, 6+4+3)
 		assert.Equal(t, global.sum, 528) // 385+33+44+66=528
 
 		evBus.RemoveListener(evName, p6)
 		evBus.RemoveListener(evName, p6) // not exist function.
-		evBus.MustFire(evName, nil)
+		evBus.MustFire(evName, 0)
 		assert.Equal(t, global.n, 6+4+3+2)
 		assert.Equal(t, global.sum, 605) // 528+33+44=605
 	})
@@ -79,56 +80,54 @@ func Test_RemoveListener(t *testing.T) {
 		f2same := testListenerCalc{bind: 22, owner: global}
 		f2copy := f2 // testListenerCalc{bind: 22, owner: global}
 
-		evBus := NewManager("")
+		evBus := event.NewManager[int]("")
 		const evName = "ev1"
-		assert.Panics(t, func() {
-			evBus.On(evName, f1)
-			evBus.On(evName, f2)
-			evBus.On(evName, f2same)
-			evBus.On(evName, f2copy)
-		})
+		evBus.On(evName, &f1)
+		evBus.On(evName, &f2)
+		evBus.On(evName, &f2same)
+		evBus.On(evName, &f2copy)
 
-		evBus.MustFire(evName, nil)
-		assert.Equal(t, global.n, 0)
-		assert.Equal(t, global.sum, 0) // 11+22+22+22=77
+		evBus.MustFire(evName, 0)
+		assert.Equal(t, global.n, 4)
+		assert.Equal(t, global.sum, 77) // 11+22+22+22=77
 
-		evBus.RemoveListener(evName, f1)
-		evBus.MustFire(evName, nil)
-		assert.Equal(t, global.n, 0)
-		assert.Equal(t, global.sum, 0) // 77+22+22+22=143
+		evBus.RemoveListener(evName, &f1)
+		evBus.MustFire(evName, 0)
+		assert.Equal(t, global.n, 7)
+		assert.Equal(t, global.sum, 143) // 77+22+22+22=143
 
-		evBus.RemoveListener(evName, f2)
-		evBus.MustFire(evName, nil)
-		assert.Equal(t, global.n, 0)
-		assert.Equal(t, global.sum, 0)
+		evBus.RemoveListener(evName, &f2)
+		evBus.MustFire(evName, 0)
+		assert.Equal(t, global.n, 7)
+		assert.Equal(t, global.sum, 143)
 	})
 
 	t.Run("same func", func(t *testing.T) {
 		global := &globalStatic
 
-		f1 := ListenerFunc(testFuncCalc1)
-		f2 := ListenerFunc(testFuncCalc2)
-		f2same := ListenerFunc(testFuncCalc2)
+		f1 := event.ListenerFunc[int](testFuncCalc1)
+		f2 := event.ListenerFunc[int](testFuncCalc2)
+		f2same := event.ListenerFunc[int](testFuncCalc2)
 		f2copy := f2
 
-		evBus := NewManager("")
+		evBus := event.NewManager[int]("")
 		const evName = "ev1"
 		evBus.On(evName, f1)
 		evBus.On(evName, f2)
 		evBus.On(evName, f2same)
 		evBus.On(evName, f2copy)
 
-		evBus.MustFire(evName, nil)
+		evBus.MustFire(evName, 0)
 		assert.Equal(t, global.n, 4)
 		assert.Equal(t, global.sum, 77) // 11+22+22+22=77
 
 		evBus.RemoveListener(evName, f1)
-		evBus.MustFire(evName, nil)
+		evBus.MustFire(evName, 0)
 		assert.Equal(t, global.n, 7)
 		assert.Equal(t, global.sum, 143) // 77+22+22+22=143
 
 		evBus.RemoveListener(evName, f2)
-		evBus.MustFire(evName, nil)
+		evBus.MustFire(evName, 0)
 		assert.Equal(t, global.n, 7)
 		assert.Equal(t, global.sum, 143) //
 	})
@@ -136,15 +135,13 @@ func Test_RemoveListener(t *testing.T) {
 
 var globalStatic = globalTestVal{}
 
-func testFuncCalc1(e Event) error {
+func testFuncCalc1(e event.Event[int]) error {
 	globalStatic.n++
-	globalStatic.sum += 11
+	globalStatic.sum += e.Data() + 11
 	return nil
 }
-func testFuncCalc2(e Event) error {
+func testFuncCalc2(e event.Event[int]) error {
 	globalStatic.n++
-	globalStatic.sum += 22
+	globalStatic.sum += e.Data() + 22
 	return nil
 }
-
-// /

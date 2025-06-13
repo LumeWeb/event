@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gookit/event"
 	"github.com/gookit/goutil/testutil/assert"
+	"go.lumeweb.com/event"
 )
 
 func TestManager_FireEvent(t *testing.T) {
-	em := event.NewManager("test")
+	em := event.NewManager[event.M]("test")
 	em.EnableLock = true
 
-	e1 := event.NewBasic("e1", nil)
+	e1 := event.NewBasic("e1", event.M{})
 	em.AddEvent(e1)
 
 	em.On("e1", &testListener{"HI"}, event.Min)
@@ -25,7 +25,7 @@ func TestManager_FireEvent(t *testing.T) {
 
 	err := em.FireEvent(e1)
 	assert.NoError(t, err)
-	assert.Equal(t, "handled: e1(WEL) -> e1(COM) -> e1(HI)", e1.Get("result"))
+	assert.Equal(t, "handled: e1(WEL) -> e1(COM) -> e1(HI)", e1.Data()["result"])
 
 	// not exist
 	err = em.FireEvent(e1.SetName("e2"))
@@ -36,16 +36,16 @@ func TestManager_FireEvent(t *testing.T) {
 
 func TestManager_FireEvent2(t *testing.T) {
 	buf := new(bytes.Buffer)
-	mgr := event.NewM("test")
+	mgr := event.NewManager[event.M]("test")
 
-	evt1 := event.New("evt1", nil).Fill(nil, event.M{"n": "inhere"})
+	evt1 := event.New("evt1", event.M{}).Fill(nil, event.M{"n": "inhere"})
 	mgr.AddEvent(evt1)
 
 	assert.True(t, mgr.HasEvent("evt1"))
 	assert.False(t, mgr.HasEvent("not-exist"))
 
-	mgr.On("evt1", event.ListenerFunc(func(e event.Event) error {
-		_, _ = fmt.Fprintf(buf, "event: %s, params: n=%s", e.Name(), e.Get("n"))
+	mgr.On("evt1", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+		_, _ = fmt.Fprintf(buf, "event: %s, params: n=%s", e.Name(), e.Data()["n"])
 		return nil
 	}), event.Normal)
 
@@ -57,7 +57,7 @@ func TestManager_FireEvent2(t *testing.T) {
 	assert.Equal(t, "event: evt1, params: n=inhere", buf.String())
 	buf.Reset()
 
-	mgr.On(event.Wildcard, event.ListenerFunc(func(e event.Event) error {
+	mgr.On(event.Wildcard, event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		buf.WriteString("|Wildcard handler")
 		return nil
 	}))
@@ -68,9 +68,9 @@ func TestManager_FireEvent2(t *testing.T) {
 }
 
 func TestManager_AsyncFire(t *testing.T) {
-	em := event.NewManager("test")
-	em.On("e1", event.ListenerFunc(func(e event.Event) error {
-		assert.Equal(t, map[string]any{"k": "v"}, e.Data())
+	em := event.NewManager[event.M]("test")
+	em.On("e1", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+		assert.Equal(t, event.M{"k": "v"}, e.Data())
 		e.Set("nk", "nv")
 		return nil
 	}))
@@ -81,7 +81,7 @@ func TestManager_AsyncFire(t *testing.T) {
 	assert.Equal(t, "nv", e1.Get("nk"))
 
 	var wg sync.WaitGroup
-	em.On("e2", event.ListenerFunc(func(e event.Event) error {
+	em.On("e2", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		defer wg.Done()
 		assert.Equal(t, "v", e.Get("k"))
 		return nil
@@ -94,10 +94,11 @@ func TestManager_AsyncFire(t *testing.T) {
 }
 
 func TestManager_AwaitFire(t *testing.T) {
-	em := event.NewManager("test")
-	em.On("e1", event.ListenerFunc(func(e event.Event) error {
-		assert.Equal(t, map[string]any{"k": "v"}, e.Data())
-		e.Set("nk", "nv")
+	em := event.NewManager[event.M]("test")
+	em.On("e1", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+		assert.Equal(t, event.M{"k": "v"}, e.Data())
+		_, err := e.SetData(event.M{"nk": "nv"})
+		assert.NoError(t, err)
 		return nil
 	}))
 
@@ -106,50 +107,51 @@ func TestManager_AwaitFire(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Contains(t, e1.Data(), "nk")
-	assert.Equal(t, "nv", e1.Get("nk"))
+	assert.Equal(t, "nv", e1.Data()["nk"])
 }
 
-func TestManager_AddSubscriber(t *testing.T) {
-	em := event.NewManager("test")
-	em.AddSubscriber(&testSubscriber{})
+func TestManager_Subscribe(t *testing.T) {
+	em := event.NewManager[event.M]("test")
+	event.Subscribe[event.M](em, &testSubscriber{})
 
 	assert.True(t, em.HasListeners("e1"))
 	assert.True(t, em.HasListeners("e2"))
 	assert.True(t, em.HasListeners("e3"))
 
-	ers := em.FireBatch("e1", event.NewBasic("e2", nil))
+	ers := em.FireBatch("e1", event.NewBasic[event.M]("e2", nil))
 	assert.Len(t, ers, 1)
 
 	assert.Panics(t, func() {
-		em.AddSubscriber(testSubscriber2{})
+		event.Subscribe[event.M](em, testSubscriber2{})
 	})
 
 	em.Clear()
 }
 
 func TestManager_ListenGroupEvent(t *testing.T) {
-	em := event.NewManager("test")
+	em := event.NewManager[event.M]("test")
+	buf := bytes.NewBuffer(nil)
 
-	e1 := event.NewBasic("app.evt1", event.M{"buf": new(bytes.Buffer)})
+	e1 := event.NewBasic("app.evt1", event.M{"buf": buf})
 	e1.AttachTo(em)
 
-	l2 := event.ListenerFunc(func(e event.Event) error {
-		e.Get("buf").(*bytes.Buffer).WriteString(" > 2 " + e.Name())
+	l2 := event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+		buf.WriteString(" > 2 " + e.Name())
 		return nil
 	})
-	l3 := event.ListenerFunc(func(e event.Event) error {
-		e.Get("buf").(*bytes.Buffer).WriteString(" > 3 " + e.Name())
+	l3 := event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+		buf.WriteString(" > 3 " + e.Name())
 		return nil
 	})
 
-	em.On("app.evt1", event.ListenerFunc(func(e event.Event) error {
-		e.Get("buf").(*bytes.Buffer).WriteString("Hi > 1 " + e.Name())
+	em.On("app.evt1", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+		buf.WriteString("Hi > 1 " + e.Name())
 		return nil
 	}))
 	em.On("app.*", l2)
 	em.On("*", l3)
 
-	buf := e1.Get("buf").(*bytes.Buffer)
+	buf = e1.Data()["buf"].(*bytes.Buffer)
 	err, e := em.Fire("app.evt1", nil)
 	assert.NoError(t, err)
 	assert.Equal(t, e1, e)
@@ -157,19 +159,19 @@ func TestManager_ListenGroupEvent(t *testing.T) {
 
 	em.RemoveListener("app.*", l2)
 	assert.Len(t, em.ListenedNames(), 2)
-	em.On("app.*", event.ListenerFunc(func(e event.Event) error {
+	em.On("app.*", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		return fmt.Errorf("an error")
 	}))
 
 	buf.Reset()
-	err, e = em.Fire("app.evt1", nil)
+	err, e = em.Fire("app.evt1", event.M{})
 	assert.Error(t, err)
 	assert.Equal(t, "Hi > 1 app.evt1", buf.String())
 
 	em.RemoveListeners("app.*")
 	em.RemoveListener("", l3)
 	em.On("app.*", l2) // re-add
-	em.On("*", event.ListenerFunc(func(e event.Event) error {
+	em.On("*", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		return fmt.Errorf("an error")
 	}))
 	assert.Len(t, em.ListenedNames(), 3)
@@ -189,12 +191,12 @@ func TestManager_ListenGroupEvent(t *testing.T) {
 
 func TestManager_Fire_WithWildcard(t *testing.T) {
 	buf := new(bytes.Buffer)
-	mgr := event.NewManager("test")
+	mgr := event.NewManager[event.M]("test")
 
 	const Event2FurcasTicketCreate = "kapal.furcas.ticket.create"
 
-	handler := event.ListenerFunc(func(e event.Event) error {
-		_, _ = fmt.Fprintf(buf, "%s-%s|", e.Name(), e.Get("user"))
+	handler := event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+		_, _ = fmt.Fprintf(buf, "%s-%s|", e.Name(), e.Data()["user"])
 		return nil
 	})
 
@@ -224,17 +226,17 @@ func TestManager_Fire_WithWildcard(t *testing.T) {
 
 func TestManager_Fire_usePathMode(t *testing.T) {
 	buf := new(bytes.Buffer)
-	em := event.NewManager("test", event.UsePathMode, event.EnableLock(true))
+	em := event.NewManager[event.M]("test", event.UsePathMode, event.EnableLock(true))
 
-	em.Listen("db.user.*", event.ListenerFunc(func(e event.Event) error {
+	em.Listen("db.user.*", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("db.user.*|")
 		return nil
 	}))
-	em.Listen("db.**", event.ListenerFunc(func(e event.Event) error {
+	em.Listen("db.**", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("db.**|")
 		return nil
 	}), 1)
-	em.Listen("db.user.add", event.ListenerFunc(func(e event.Event) error {
+	em.Listen("db.user.add", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("db.user.add|")
 		return nil
 	}), 2)
@@ -244,7 +246,7 @@ func TestManager_Fire_usePathMode(t *testing.T) {
 		err, e := em.Fire("db.user.add", event.M{"user": "inhere"})
 		assert.NoError(t, err)
 		assert.Equal(t, "db.user.add", e.Name())
-		assert.Equal(t, "inhere", e.Get("user"))
+		assert.Equal(t, "inhere", e.Data()["user"])
 		str := buf.String()
 		fmt.Println(str)
 		assert.Contains(t, str, "db.**|")
@@ -257,7 +259,7 @@ func TestManager_Fire_usePathMode(t *testing.T) {
 	t.Run("fire case2", func(t *testing.T) {
 		err, e := em.Fire("db.user.del", event.M{"user": "inhere"})
 		assert.NoError(t, err)
-		assert.Equal(t, "inhere", e.Get("user"))
+		assert.Equal(t, "inhere", e.Data()["user"])
 		str := buf.String()
 		fmt.Println(str)
 		assert.Contains(t, str, "db.**|")
@@ -269,11 +271,11 @@ func TestManager_Fire_usePathMode(t *testing.T) {
 	em.RemoveListeners("db.user.*")
 	assert.False(t, em.HasListeners("db.user.*"))
 
-	em.Listen("*", event.ListenerFunc(func(e event.Event) error {
+	em.Listen("*", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("*|")
 		return nil
 	}), 3)
-	em.Listen("db.*.update", event.ListenerFunc(func(e event.Event) error {
+	em.Listen("db.*.update", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("db.*.update|")
 		return nil
 	}), 4)
@@ -281,7 +283,7 @@ func TestManager_Fire_usePathMode(t *testing.T) {
 	t.Run("fire case3", func(t *testing.T) {
 		err, e := em.Fire("db.user.update", event.M{"user": "inhere"})
 		assert.NoError(t, err)
-		assert.Equal(t, "inhere", e.Get("user"))
+		assert.Equal(t, "inhere", e.Data()["user"])
 		str := buf.String()
 		fmt.Println(str)
 		assert.Contains(t, str, "*|")
@@ -294,7 +296,7 @@ func TestManager_Fire_usePathMode(t *testing.T) {
 	t.Run("not-exist", func(t *testing.T) {
 		err, e := em.Fire("not-exist", event.M{"user": "inhere"})
 		assert.NoError(t, err)
-		assert.Equal(t, "inhere", e.Get("user"))
+		assert.Equal(t, "inhere", e.Data()["user"])
 		str := buf.String()
 		fmt.Println(str)
 		assert.Equal(t, "*|", str)
@@ -302,38 +304,38 @@ func TestManager_Fire_usePathMode(t *testing.T) {
 }
 
 func TestManager_Fire_AllNode(t *testing.T) {
-	em := event.NewManager("test", event.UsePathMode, event.EnableLock(false))
+	em := event.NewManager[event.M]("test", event.UsePathMode, event.EnableLock(false))
 
 	buf := new(bytes.Buffer)
-	em.Listen("**.add", event.ListenerFunc(func(e event.Event) error {
+	em.Listen("**.add", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("**.add|")
 		return nil
 	}))
 
 	err, e := em.Trigger("db.user.add", event.M{"user": "inhere"})
 	assert.NoError(t, err)
-	assert.Equal(t, "inhere", e.Get("user"))
+	assert.Equal(t, "inhere", e.Data()["user"])
 	str := buf.String()
 	assert.Equal(t, "**.add|", str)
 }
 
 func TestManager_FireC(t *testing.T) {
-	em := event.NewManager("test", event.UsePathMode, event.EnableLock(true))
-	defer func(em *event.Manager) {
+	em := event.NewManager[event.M]("test", event.UsePathMode, event.EnableLock(true))
+	defer func(em *event.Manager[event.M]) {
 		_ = em.Close()
 	}(em)
 
 	buf := new(bytes.Buffer)
-	em.Listen("db.user.*", event.ListenerFunc(func(e event.Event) error {
+	em.Listen("db.user.*", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("db.user.*|")
 		return nil
 	}))
-	em.Listen("db.**", event.ListenerFunc(func(e event.Event) error {
+	em.Listen("db.**", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("db.**|")
 		return nil
 	}), 1)
 
-	em.Listen("db.user.add", event.ListenerFunc(func(e event.Event) error {
+	em.Listen("db.user.add", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("db.user.add|")
 		return nil
 	}), 2)
@@ -361,10 +363,10 @@ func TestManager_FireC(t *testing.T) {
 }
 
 func TestManager_Wait(t *testing.T) {
-	em := event.NewManager("test", event.UsePathMode)
+	em := event.NewManager[event.M]("test", event.UsePathMode)
 
 	buf := new(bytes.Buffer)
-	em.Listen("db.user.*", event.ListenerFunc(func(e event.Event) error {
+	em.Listen("db.user.*", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
 		time.Sleep(time.Millisecond * 200)
 		_, _ = buf.WriteString("db.user.*|")
 		return nil
@@ -381,10 +383,13 @@ func TestManager_Wait(t *testing.T) {
 }
 
 func TestManager_Once(t *testing.T) {
-	em := event.NewManager("test")
+	em := event.NewManager[event.M]("test")
 
-	em.Once("evt1", event.ListenerFunc(emptyListener))
+	em.Once("evt1", event.ListenerFunc[event.M](emptyListener))
 	assert.True(t, em.HasListeners("evt1"))
-	em.Trigger("evt1", nil)
+	err, _ := em.Trigger("evt1", event.M{})
+	if err != nil {
+		t.Error(err)
+	}
 	assert.False(t, em.HasListeners("evt1"))
 }

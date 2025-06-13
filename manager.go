@@ -13,12 +13,12 @@ const (
 )
 
 // Manager event manager definition. for manage events and listeners
-type Manager struct {
+type Manager[T any] struct {
 	Options
 	sync.Mutex
 
 	wg  sync.WaitGroup
-	ch  chan Event
+	ch  chan Event[T]
 	oc  sync.Once
 	err error // latest error
 
@@ -26,33 +26,31 @@ type Manager struct {
 	name string
 	// pool sync.Pool
 	// is a sample for new BasicEvent
-	sample *BasicEvent
+	sample *BasicEvent[T]
 
-	// storage user custom Event instance. you can pre-define some Event instances.
-	events map[string]Event
 	// storage user pre-defined event factory func.
-	eventFc map[string]FactoryFunc
+	eventFc map[string]FactoryFunc[T]
 
 	// storage all event name and ListenerQueue map
-	listeners map[string]*ListenerQueue
+	listeners map[string]*ListenerQueue[T]
 	// storage all event names by listened
 	listenedNames map[string]int
 }
 
-// NewM create event manager. alias of the NewManager()
-func NewM(name string, fns ...OptionFn) *Manager {
-	return NewManager(name, fns...)
+// NewM create event manager with type any. Alias of NewManager[any]().
+func NewM(name string, fns ...OptionFn) *Manager[any] {
+	return NewManager[any](name, fns...)
 }
 
 // NewManager create event manager
-func NewManager(name string, fns ...OptionFn) *Manager {
-	em := &Manager{
+func NewManager[T any](name string, fns ...OptionFn) *Manager[T] {
+	em := &Manager[T]{
 		name:   name,
-		sample: &BasicEvent{},
+		sample: &BasicEvent[T]{},
 		// events storage
-		eventFc: make(map[string]FactoryFunc),
+		eventFc: make(map[string]FactoryFunc[T]),
 		// listeners
-		listeners:     make(map[string]*ListenerQueue),
+		listeners:     make(map[string]*ListenerQueue[T]),
 		listenedNames: make(map[string]int),
 	}
 
@@ -66,7 +64,7 @@ func NewManager(name string, fns ...OptionFn) *Manager {
 }
 
 // WithOptions create event manager with options
-func (em *Manager) WithOptions(fns ...OptionFn) *Manager {
+func (em *Manager[T]) WithOptions(fns ...OptionFn) *Manager[T] {
 	for _, fn := range fns {
 		fn(&em.Options)
 	}
@@ -78,19 +76,19 @@ func (em *Manager) WithOptions(fns ...OptionFn) *Manager {
  *************************************************************/
 
 // AddListener register a event handler/listener. alias of the method On()
-func (em *Manager) AddListener(name string, listener Listener, priority ...int) {
+func (em *Manager[T]) AddListener(name string, listener Listener[T], priority ...int) {
 	em.On(name, listener, priority...)
 }
 
 // Listen register a event handler/listener. alias of the On()
-func (em *Manager) Listen(name string, listener Listener, priority ...int) {
+func (em *Manager[T]) Listen(name string, listener Listener[T], priority ...int) {
 	em.On(name, listener, priority...)
 }
 
 // Listen register a event handler/listener. trigger once.
-func (em *Manager) Once(name string, listener Listener, priority ...int) {
-	var listenerOnce Listener
-	listenerOnce = ListenerFunc(func(e Event) error {
+func (em *Manager[T]) Once(name string, listener Listener[T], priority ...int) {
+	var listenerOnce Listener[T]
+	listenerOnce = ListenerFunc[T](func(e Event[T]) error {
 		em.RemoveListener(name, listenerOnce)
 		return listener.Handle(e)
 	})
@@ -103,40 +101,27 @@ func (em *Manager) Once(name string, listener Listener, priority ...int) {
 //
 //	em.On("evt0", listener)
 //	em.On("evt0", listener, High)
-func (em *Manager) On(name string, listener Listener, priority ...int) {
+func (em *Manager[T]) On(name string, listener Listener[T], priority ...int) {
 	pv := Normal
 	if len(priority) > 0 {
 		pv = priority[0]
 	}
 
-	em.addListenerItem(name, &ListenerItem{pv, listener})
+	em.addListenerItem(name, &ListenerItem[T]{pv, listener})
 }
 
-// Subscribe add events by subscriber interface. alias of the AddSubscriber()
-func (em *Manager) Subscribe(sbr Subscriber) {
-	em.AddSubscriber(sbr)
-}
-
-// AddSubscriber add events by subscriber interface.
-//
-// you can register multi event listeners in a struct func.
-// more usage please see README or tests.
-func (em *Manager) AddSubscriber(sbr Subscriber) {
-	for name, listener := range sbr.SubscribedEvents() {
-		switch lt := listener.(type) {
-		case Listener:
-			em.On(name, lt)
-		// case ListenerFunc:
-		// 	em.On(name, lt)
-		case ListenerItem:
-			em.addListenerItem(name, &lt)
-		default:
-			panic("event: the value must be an Listener or ListenerItem instance")
-		}
+// AddListeners registers multiple listeners at once.
+func (em *Manager[T]) AddListeners(listeners map[string]Listener[T], priority ...int) {
+	pv := Normal
+	if len(priority) > 0 {
+		pv = priority[0]
+	}
+	for name, listener := range listeners {
+		em.addListenerItem(name, &ListenerItem[T]{pv, listener})
 	}
 }
 
-func (em *Manager) addListenerItem(name string, li *ListenerItem) {
+func (em *Manager[T]) addListenerItem(name string, li *ListenerItem[T]) {
 	name = goodName(name, true)
 	if li.Listener == nil {
 		panicf("event: the event %q listener cannot be empty", name)
@@ -150,7 +135,7 @@ func (em *Manager) addListenerItem(name string, li *ListenerItem) {
 		lq.Push(li)
 	} else { // first add.
 		em.listenedNames[name] = 1
-		em.listeners[name] = (&ListenerQueue{}).Push(li)
+		em.listeners[name] = (&ListenerQueue[T]{}).Push(li)
 	}
 }
 
@@ -159,13 +144,13 @@ func (em *Manager) addListenerItem(name string, li *ListenerItem) {
  *************************************************************/
 
 // MustTrigger alias of the method MustFire()
-func (em *Manager) MustTrigger(name string, params M) Event {
-	return em.MustFire(name, params)
+func (em *Manager[T]) MustTrigger(name string, data T) Event[T] {
+	return em.MustFire(name, data)
 }
 
 // MustFire fire event by name. will panic on error
-func (em *Manager) MustFire(name string, params M) Event {
-	err, e := em.Fire(name, params)
+func (em *Manager[T]) MustFire(name string, data T) Event[T] {
+	err, e := em.Fire(name, data)
 	if err != nil {
 		panic(err)
 	}
@@ -173,14 +158,14 @@ func (em *Manager) MustFire(name string, params M) Event {
 }
 
 // Trigger alias of the method Fire()
-func (em *Manager) Trigger(name string, params M) (error, Event) {
-	return em.Fire(name, params)
+func (em *Manager[T]) Trigger(name string, data T) (error, Event[T]) {
+	return em.Fire(name, data)
 }
 
 // Fire trigger event by name. if not found listener, will return (nil, nil)
-func (em *Manager) Fire(name string, params M) (err error, e Event) {
+func (em *Manager[T]) Fire(name string, data T) (err error, e Event[T]) {
 	// call listeners handle event
-	e, err = em.fireByName(name, params, false)
+	e, err = em.fireByName(name, data, false)
 	return
 }
 
@@ -188,16 +173,16 @@ func (em *Manager) Fire(name string, params M) (err error, e Event) {
 //
 // Note: if you want to use this method, you should
 // call the method Close() after all events are fired.
-func (em *Manager) Async(name string, params M) {
-	_, _ = em.fireByName(name, params, true)
+func (em *Manager[T]) Async(name string, data T) {
+	_, _ = em.fireByName(name, data, true)
 }
 
 // FireC async fire event by go channel. alias of the method Async()
 //
 // Note: if you want to use this method, you should
 // call the method Close() after all events are fired.
-func (em *Manager) FireC(name string, params M) {
-	_, _ = em.fireByName(name, params, true)
+func (em *Manager[T]) FireC(name string, data T) {
+	_, _ = em.fireByName(name, data, true)
 }
 
 // fire event by name.
@@ -207,13 +192,14 @@ func (em *Manager) FireC(name string, params M) {
 // On useCh=false:
 //   - will call listeners handle event.
 //   - if not found listener, will return (nil, nil)
-func (em *Manager) fireByName(name string, params M, useCh bool) (e Event, err error) {
+func (em *Manager[T]) fireByName(name string, params T, useCh bool) (e Event[T], err error) {
 	name = goodName(name, false)
 
 	// use pre-defined Event
 	if fc, ok := em.eventFc[name]; ok {
 		e = fc() // make new instance
-		if params != nil {
+		// Check if params is non-zero using reflection
+		if !reflect.ValueOf(params).IsZero() {
 			e.SetData(params)
 		}
 	} else {
@@ -233,7 +219,7 @@ func (em *Manager) fireByName(name string, params M, useCh bool) (e Event, err e
 }
 
 // FireEvent fire event by given Event instance
-func (em *Manager) FireEvent(e Event) (err error) {
+func (em *Manager[T]) FireEvent(e Event[T]) (err error) {
 	if em.EnableLock {
 		em.Lock()
 		defer em.Unlock()
@@ -271,7 +257,7 @@ func (em *Manager) FireEvent(e Event) (err error) {
 //
 // Example:
 //   - event "db.user.add" will trigger listeners on the "db.user.*"
-func (em *Manager) fireSimpleMode(name string, e Event) (err error) {
+func (em *Manager[T]) fireSimpleMode(name string, e Event[T]) (err error) {
 	// fire direct matched listeners. eg: db.user.add
 	if lq, ok := em.listeners[name]; ok {
 		// sort by priority before call.
@@ -306,7 +292,7 @@ func (em *Manager) fireSimpleMode(name string, e Event) (err error) {
 // Example:
 //   - event "db.user.add" will trigger listeners on the "db.**"
 //   - event "db.user.add" will trigger listeners on the "db.user.*"
-func (em *Manager) firePathMode(name string, e Event) (err error) {
+func (em *Manager[T]) firePathMode(name string, e Event[T]) (err error) {
 	for pattern, lq := range em.listeners {
 		if pattern == name || matchNodePath(pattern, name, ".") {
 			for _, li := range lq.Sort().Items() {
@@ -334,7 +320,7 @@ func (em *Manager) firePathMode(name string, e Event) (err error) {
 //
 //	em := NewManager("test")
 //	em.FireAsync("db.user.add", M{"id": 1001})
-func (em *Manager) FireAsync(e Event) {
+func (em *Manager[T]) FireAsync(e Event[T]) {
 	// once make consumers
 	em.oc.Do(func() {
 		em.makeConsumers()
@@ -345,7 +331,7 @@ func (em *Manager) FireAsync(e Event) {
 }
 
 // async fire event by 'go' keywords
-func (em *Manager) makeConsumers() {
+func (em *Manager[T]) makeConsumers() {
 	if em.ConsumerNum <= 0 {
 		em.ConsumerNum = defaultConsumerNum
 	}
@@ -353,7 +339,7 @@ func (em *Manager) makeConsumers() {
 		em.ChannelSize = defaultChannelSize
 	}
 
-	em.ch = make(chan Event, em.ChannelSize)
+	em.ch = make(chan Event[T], em.ChannelSize)
 
 	// make event consumers
 	for i := 0; i < em.ConsumerNum; i++ {
@@ -376,7 +362,7 @@ func (em *Manager) makeConsumers() {
 }
 
 // CloseWait close channel and wait all async event done.
-func (em *Manager) CloseWait() error {
+func (em *Manager[T]) CloseWait() error {
 	if err := em.Close(); err != nil {
 		return err
 	}
@@ -384,13 +370,13 @@ func (em *Manager) CloseWait() error {
 }
 
 // Wait wait all async event done.
-func (em *Manager) Wait() error {
+func (em *Manager[T]) Wait() error {
 	em.wg.Wait()
 	return em.err
 }
 
 // Close event channel, deny to fire new event.
-func (em *Manager) Close() error {
+func (em *Manager[T]) Close() error {
 	if em.ch != nil {
 		close(em.ch)
 	}
@@ -398,19 +384,27 @@ func (em *Manager) Close() error {
 }
 
 // FireBatch fire multi event at once.
-//
-// Usage:
-//
-//	FireBatch("name1", "name2", &MyEvent{})
-func (em *Manager) FireBatch(es ...any) (ers []error) {
+func (em *Manager[T]) FireBatch(es ...any) (ers []error) {
 	var err error
+	var tEvent Event[T]
+	var evt Event[T]
+	var evtM Event[M]
+	var ok bool
+	var name string
 	for _, e := range es {
-		if name, ok := e.(string); ok {
-			err, _ = em.Fire(name, nil)
-		} else if evt, ok := e.(Event); ok {
+		if name, ok = e.(string); ok {
+			err, _ = em.Fire(name, *new(T))
+		} else if evt, ok = e.(Event[T]); ok {
 			err = em.FireEvent(evt)
-		} // ignore invalid param.
-
+		} else if evtM, ok = e.(Event[M]); ok {
+			// Convert M event to T event using helper
+			tEvent, err = ConvertEvent[M, T](evtM)
+			if err != nil {
+				ers = append(ers, err)
+				continue
+			}
+			err = em.FireEvent(tEvent)
+		}
 		if err != nil {
 			ers = append(ers, err)
 		}
@@ -419,17 +413,17 @@ func (em *Manager) FireBatch(es ...any) (ers []error) {
 }
 
 // AsyncFire simple async fire event by 'go' keywords
-func (em *Manager) AsyncFire(e Event) {
-	go func(e Event) {
+func (em *Manager[T]) AsyncFire(e Event[T]) {
+	go func(e Event[T]) {
 		_ = em.FireEvent(e)
 	}(e)
 }
 
 // AwaitFire async fire event by 'go' keywords, but will wait return result
-func (em *Manager) AwaitFire(e Event) (err error) {
+func (em *Manager[T]) AwaitFire(e Event[T]) (err error) {
 	ch := make(chan error)
 
-	go func(e Event) {
+	go func(e Event[T]) {
 		err := em.FireEvent(e)
 		ch <- err
 	}(e)
@@ -444,52 +438,57 @@ func (em *Manager) AwaitFire(e Event) (err error) {
  *************************************************************/
 
 // AddEvent add a pre-defined event instance to manager.
-func (em *Manager) AddEvent(e Event) {
+func (em *Manager[T]) AddEvent(e Event[T]) {
 	name := goodName(e.Name(), false)
 
-	if ec, ok := e.(Cloneable); ok {
-		em.AddEventFc(name, func() Event {
+	var ok bool
+	_, ok = e.(Cloneable[T])
+
+	if ok {
+		ec := e.(Cloneable[T])
+		em.AddEventFc(name, func() Event[T] {
 			return ec.Clone()
 		})
 	} else {
-		em.AddEventFc(name, func() Event {
+		em.AddEventFc(name, func() Event[T] {
 			return e
 		})
 	}
 }
 
 // AddEventFc add a pre-defined event factory func to manager.
-func (em *Manager) AddEventFc(name string, fc FactoryFunc) {
+func (em *Manager[T]) AddEventFc(name string, fc FactoryFunc[T]) {
 	em.Lock()
 	em.eventFc[name] = fc
 	em.Unlock()
 }
 
 // GetEvent get a pre-defined event instance by name
-func (em *Manager) GetEvent(name string) (e Event, ok bool) {
+func (em *Manager[T]) GetEvent(name string) (e Event[T], ok bool) {
 	fc, ok := em.eventFc[name]
 	if ok {
-		return fc(), true
+		e = fc()
+		return
 	}
 	return
 }
 
 // HasEvent has pre-defined event check
-func (em *Manager) HasEvent(name string) bool {
+func (em *Manager[T]) HasEvent(name string) bool {
 	_, ok := em.eventFc[name]
 	return ok
 }
 
 // RemoveEvent delete pre-define Event by name
-func (em *Manager) RemoveEvent(name string) {
+func (em *Manager[T]) RemoveEvent(name string) {
 	if _, ok := em.eventFc[name]; ok {
 		delete(em.eventFc, name)
 	}
 }
 
 // RemoveEvents remove all registered events
-func (em *Manager) RemoveEvents() {
-	em.eventFc = map[string]FactoryFunc{}
+func (em *Manager[T]) RemoveEvents() {
+	em.eventFc = make(map[string]FactoryFunc[T])
 }
 
 /*************************************************************
@@ -497,7 +496,7 @@ func (em *Manager) RemoveEvents() {
  *************************************************************/
 
 // newBasicEvent create new BasicEvent by clone em.sample
-func (em *Manager) newBasicEvent(name string, data M) *BasicEvent {
+func (em *Manager[T]) newBasicEvent(name string, data T) *BasicEvent[T] {
 	var cp = *em.sample
 
 	cp.SetName(name)
@@ -506,23 +505,23 @@ func (em *Manager) newBasicEvent(name string, data M) *BasicEvent {
 }
 
 // HasListeners check has direct listeners for the event name.
-func (em *Manager) HasListeners(name string) bool {
+func (em *Manager[T]) HasListeners(name string) bool {
 	_, ok := em.listenedNames[name]
 	return ok
 }
 
 // Listeners get all listeners
-func (em *Manager) Listeners() map[string]*ListenerQueue {
+func (em *Manager[T]) Listeners() map[string]*ListenerQueue[T] {
 	return em.listeners
 }
 
 // ListenersByName get listeners by given event name
-func (em *Manager) ListenersByName(name string) *ListenerQueue {
+func (em *Manager[T]) ListenersByName(name string) *ListenerQueue[T] {
 	return em.listeners[name]
 }
 
 // ListenersCount get listeners number for the event name.
-func (em *Manager) ListenersCount(name string) int {
+func (em *Manager[T]) ListenersCount(name string) int {
 	if lq, ok := em.listeners[name]; ok {
 		return lq.Len()
 	}
@@ -530,7 +529,7 @@ func (em *Manager) ListenersCount(name string) int {
 }
 
 // ListenedNames get listened event names
-func (em *Manager) ListenedNames() map[string]int {
+func (em *Manager[T]) ListenedNames() map[string]int {
 	return em.listenedNames
 }
 
@@ -540,7 +539,7 @@ func (em *Manager) ListenedNames() map[string]int {
 //
 //	RemoveListener("", listener)
 //	RemoveListener("name", listener) // limit event name.
-func (em *Manager) RemoveListener(name string, listener Listener) {
+func (em *Manager[T]) RemoveListener(name string, listener Listener[T]) {
 	if name != "" {
 		if lq, ok := em.listeners[name]; ok {
 			lq.Remove(listener)
@@ -567,7 +566,7 @@ func (em *Manager) RemoveListener(name string, listener Listener) {
 }
 
 // RemoveListeners remove listeners by given name
-func (em *Manager) RemoveListeners(name string) {
+func (em *Manager[T]) RemoveListeners(name string) {
 	_, ok := em.listenedNames[name]
 	if ok {
 		em.listeners[name].Clear()
@@ -579,10 +578,50 @@ func (em *Manager) RemoveListeners(name string) {
 }
 
 // Clear alias of the Reset()
-func (em *Manager) Clear() { em.Reset() }
+func (em *Manager[T]) Clear() { em.Reset() }
+
+// Subscribe adds all listeners from a subscriber
+func (em *Manager[T]) Subscribe(sbr Subscriber[T]) {
+	events := sbr.SubscribedEvents()
+	for name, listener := range events {
+		l, priority, err := convertListener[T](listener)
+		if err != nil {
+			panicf("event: invalid listener type %T for event '%s': %v", listener, name, err)
+		}
+		em.On(name, l, priority)
+	}
+}
+
+// convertListener converts a listener to the target type T with optional priority
+func convertListener[T any](listener any) (Listener[T], int, error) {
+	switch lt := listener.(type) {
+	case Listener[T]:
+		return lt, Normal, nil
+	case *Listener[T]:
+		return *lt, Normal, nil
+	case ListenerItem[T]:
+		return lt.Listener, lt.Priority, nil
+	case Listener[M]:
+		return ConvertListener[M, T](lt), Normal, nil
+	case ListenerItem[M]:
+		return ConvertListener[M, T](lt.Listener), lt.Priority, nil
+	default:
+		rt := reflect.TypeOf(listener)
+		if rt != nil && rt.Kind() == reflect.Ptr {
+			// Try pointer types
+			if l, ok := listener.(Listener[M]); ok {
+				return ConvertListener[M, T](l), Normal, nil
+			}
+			if l, ok := listener.(Listener[T]); ok {
+				return l, Normal, nil
+			}
+		}
+		return nil, 0, fmt.Errorf("unsupported listener type")
+	}
+}
 
 // Reset the manager, clear all data.
-func (em *Manager) Reset() {
+func (em *Manager[T]) Reset() {
 	// clear all listeners
 	for _, lq := range em.listeners {
 		lq.Clear()
@@ -593,7 +632,7 @@ func (em *Manager) Reset() {
 	em.oc = sync.Once{}
 	em.wg = sync.WaitGroup{}
 
-	em.eventFc = make(map[string]FactoryFunc)
-	em.listeners = make(map[string]*ListenerQueue)
+	em.eventFc = make(map[string]FactoryFunc[T])
+	em.listeners = make(map[string]*ListenerQueue[T])
 	em.listenedNames = make(map[string]int)
 }
