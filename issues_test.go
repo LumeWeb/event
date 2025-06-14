@@ -3,18 +3,30 @@ package event_test
 import (
 	"bytes"
 	"fmt"
-	"testing"
-	"time"
-
 	"github.com/gookit/goutil/testutil/assert"
 	"go.lumeweb.com/event/v2"
+	"sync"
+	"sync/atomic"
+	"testing"
 )
 
-type testNotify struct{}
+type testNotify struct {
+	id string
+}
+
+var notifyCounter uint64
 
 func (notify *testNotify) Handle(e event.Event[any]) error {
 	isRun = true
 	return nil
+}
+
+func (notify *testNotify) ID() string {
+	if notify.id == "" {
+		counter := atomic.AddUint64(&notifyCounter, 1)
+		notify.id = fmt.Sprintf("testNotify_%d", counter)
+	}
+	return notify.id
 }
 
 var isRun = false
@@ -39,14 +51,14 @@ func TestIssues_9(t *testing.T) {
 	evBus := event.NewManager[event.M]("")
 	eName := "evt1"
 
-	f1 := makeFn(11)
+	f1 := event.NewListenerFunc(makeFn(11))
 	evBus.On(eName, f1)
 
-	f2 := makeFn(22)
+	f2 := event.NewListenerFunc(makeFn(22))
 	evBus.On(eName, f2)
 	assert.Equal(t, 2, evBus.ListenersCount(eName))
 
-	f3 := event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	f3 := event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		// dump.Println(e.Name())
 		return nil
 	})
@@ -59,7 +71,7 @@ func TestIssues_9(t *testing.T) {
 	evBus.MustFire(eName, event.M{"arg0": "val0", "arg1": "val1"})
 }
 
-func makeFn(a int) event.ListenerFunc[event.M] {
+func makeFn(a int) event.EventHandlerFunc[event.M] {
 	return func(e event.Event[event.M]) error {
 		_, err := e.SetData(event.M{"val": a})
 		if err != nil {
@@ -75,7 +87,7 @@ func TestIssues_20(t *testing.T) {
 	buf := new(bytes.Buffer)
 	mgr := event.NewManager[event.M]("test")
 
-	handler := event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	handler := event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = fmt.Fprintf(buf, "%s-%s|", e.Name(), e.Data()["user"])
 		return nil
 	})
@@ -102,11 +114,14 @@ func TestIssues_61(t *testing.T) {
 	})
 	defer em.CloseWait()
 
-	var listener event.ListenerFunc[event.M] = func(e event.Event[event.M]) error {
-		time.Sleep(1 * time.Second)
+	var wg sync.WaitGroup
+	wg.Add(20)
+
+	listener := event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
+		defer wg.Done()
 		fmt.Println("event received!", e.Name(), "index", e.Data()["arg0"])
 		return nil
-	}
+	})
 
 	em.On("app.evt1", listener, event.Normal)
 
@@ -115,4 +130,5 @@ func TestIssues_61(t *testing.T) {
 	}
 
 	fmt.Println("publish event finished!")
+	wg.Wait() // Wait for all events to be processed
 }

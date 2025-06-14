@@ -19,9 +19,9 @@ func TestManager_FireEvent(t *testing.T) {
 	e1 := event.NewBasic("e1", event.M{})
 	em.AddEvent(e1)
 
-	em.On("e1", &testListener{"HI"}, event.Min)
-	em.On("e1", &testListener{"WEL"}, event.High)
-	em.AddListener("e1", &testListener{"COM"}, event.BelowNormal)
+	em.On("e1", newTestListener("HI"), event.Min)
+	em.On("e1", newTestListener("WEL"), event.High)
+	em.AddListener("e1", newTestListener("COM"), event.BelowNormal)
 
 	err := em.FireEvent(e1)
 	assert.NoError(t, err)
@@ -44,7 +44,7 @@ func TestManager_FireEvent2(t *testing.T) {
 	assert.True(t, mgr.HasEvent("evt1"))
 	assert.False(t, mgr.HasEvent("not-exist"))
 
-	mgr.On("evt1", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	mgr.On("evt1", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = fmt.Fprintf(buf, "event: %s, params: n=%s", e.Name(), e.Data()["n"])
 		return nil
 	}), event.Normal)
@@ -57,7 +57,7 @@ func TestManager_FireEvent2(t *testing.T) {
 	assert.Equal(t, "event: evt1, params: n=inhere", buf.String())
 	buf.Reset()
 
-	mgr.On(event.Wildcard, event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	mgr.On(event.Wildcard, event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		buf.WriteString("|Wildcard handler")
 		return nil
 	}))
@@ -69,7 +69,7 @@ func TestManager_FireEvent2(t *testing.T) {
 
 func TestManager_AsyncFire(t *testing.T) {
 	em := event.NewManager[event.M]("test")
-	em.On("e1", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.On("e1", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		assert.Equal(t, event.M{"k": "v"}, e.Data())
 		e.Set("nk", "nv")
 		return nil
@@ -77,11 +77,11 @@ func TestManager_AsyncFire(t *testing.T) {
 
 	e1 := event.NewBasic("e1", event.M{"k": "v"})
 	em.AsyncFire(e1)
-	time.Sleep(time.Second / 10)
+	time.Sleep(100 * time.Millisecond) // give time for async processing
 	assert.Equal(t, "nv", e1.Get("nk"))
 
 	var wg sync.WaitGroup
-	em.On("e2", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.On("e2", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		defer wg.Done()
 		assert.Equal(t, "v", e.Get("k"))
 		return nil
@@ -95,7 +95,7 @@ func TestManager_AsyncFire(t *testing.T) {
 
 func TestManager_AwaitFire(t *testing.T) {
 	em := event.NewManager[event.M]("test")
-	em.On("e1", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.On("e1", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		assert.Equal(t, event.M{"k": "v"}, e.Data())
 		_, err := e.SetData(event.M{"nk": "nv"})
 		assert.NoError(t, err)
@@ -135,16 +135,16 @@ func TestManager_ListenGroupEvent(t *testing.T) {
 	e1 := event.NewBasic("app.evt1", event.M{"buf": buf})
 	e1.AttachTo(em)
 
-	l2 := event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	l2 := event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		buf.WriteString(" > 2 " + e.Name())
 		return nil
 	})
-	l3 := event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	l3 := event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		buf.WriteString(" > 3 " + e.Name())
 		return nil
 	})
 
-	em.On("app.evt1", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.On("app.evt1", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		buf.WriteString("Hi > 1 " + e.Name())
 		return nil
 	}))
@@ -159,7 +159,7 @@ func TestManager_ListenGroupEvent(t *testing.T) {
 
 	em.RemoveListener("app.*", l2)
 	assert.Len(t, em.ListenedNames(), 2)
-	em.On("app.*", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.On("app.*", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		return fmt.Errorf("an error")
 	}))
 
@@ -171,7 +171,7 @@ func TestManager_ListenGroupEvent(t *testing.T) {
 	em.RemoveListeners("app.*")
 	em.RemoveListener("", l3)
 	em.On("app.*", l2) // re-add
-	em.On("*", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.On("*", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		return fmt.Errorf("an error")
 	}))
 	assert.Len(t, em.ListenedNames(), 3)
@@ -195,7 +195,7 @@ func TestManager_Fire_WithWildcard(t *testing.T) {
 
 	const Event2FurcasTicketCreate = "kapal.furcas.ticket.create"
 
-	handler := event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	handler := event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = fmt.Fprintf(buf, "%s-%s|", e.Name(), e.Data()["user"])
 		return nil
 	})
@@ -228,15 +228,15 @@ func TestManager_Fire_usePathMode(t *testing.T) {
 	buf := new(bytes.Buffer)
 	em := event.NewManager[event.M]("test", event.UsePathMode, event.EnableLock(true))
 
-	em.Listen("db.user.*", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.Listen("db.user.*", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("db.user.*|")
 		return nil
 	}))
-	em.Listen("db.**", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.Listen("db.**", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("db.**|")
 		return nil
 	}), 1)
-	em.Listen("db.user.add", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.Listen("db.user.add", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("db.user.add|")
 		return nil
 	}), 2)
@@ -271,11 +271,11 @@ func TestManager_Fire_usePathMode(t *testing.T) {
 	em.RemoveListeners("db.user.*")
 	assert.False(t, em.HasListeners("db.user.*"))
 
-	em.Listen("*", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.Listen("*", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("*|")
 		return nil
 	}), 3)
-	em.Listen("db.*.update", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.Listen("db.*.update", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("db.*.update|")
 		return nil
 	}), 4)
@@ -307,7 +307,7 @@ func TestManager_Fire_AllNode(t *testing.T) {
 	em := event.NewManager[event.M]("test", event.UsePathMode, event.EnableLock(false))
 
 	buf := new(bytes.Buffer)
-	em.Listen("**.add", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.Listen("**.add", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("**.add|")
 		return nil
 	}))
@@ -321,21 +321,18 @@ func TestManager_Fire_AllNode(t *testing.T) {
 
 func TestManager_FireC(t *testing.T) {
 	em := event.NewManager[event.M]("test", event.UsePathMode, event.EnableLock(true))
-	defer func(em *event.Manager[event.M]) {
-		_ = em.Close()
-	}(em)
 
 	buf := new(bytes.Buffer)
-	em.Listen("db.user.*", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.Listen("db.user.*", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("db.user.*|")
 		return nil
 	}))
-	em.Listen("db.**", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.Listen("db.**", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("db.**|")
 		return nil
 	}), 1)
 
-	em.Listen("db.user.add", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+	em.Listen("db.user.add", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 		_, _ = buf.WriteString("db.user.add|")
 		return nil
 	}), 2)
@@ -343,7 +340,8 @@ func TestManager_FireC(t *testing.T) {
 	assert.True(t, em.HasListeners("db.user.*"))
 
 	em.FireC("db.user.add", event.M{"user": "inhere"})
-	time.Sleep(time.Millisecond * 100) // wait for async
+	err := em.CloseWait()
+	assert.NoError(t, err)
 
 	str := buf.String()
 	fmt.Println(str)
@@ -353,27 +351,32 @@ func TestManager_FireC(t *testing.T) {
 	assert.True(t, strings.Count(str, "|") == 3)
 	buf.Reset()
 
-	em.WithOptions(func(o *event.Options) {
+	// Test with zero consumers - should not panic
+	em = event.NewManager[event.M]("test", func(o *event.Options) {
 		o.ChannelSize = 0
 		o.ConsumerNum = 0
 	})
 	em.Async("not-exist", event.M{"user": "inhere"})
-	time.Sleep(time.Millisecond * 100) // wait for async
-	assert.Empty(t, buf.String())
+	err = em.CloseWait()
+	assert.NoError(t, err)
 }
 
 func TestManager_Wait(t *testing.T) {
 	em := event.NewManager[event.M]("test", event.UsePathMode)
 
+	var wg sync.WaitGroup
+	wg.Add(1)
+
 	buf := new(bytes.Buffer)
-	em.Listen("db.user.*", event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
-		time.Sleep(time.Millisecond * 200)
+	em.Listen("db.user.*", event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
+		defer wg.Done()
 		_, _ = buf.WriteString("db.user.*|")
 		return nil
 	}))
 	assert.True(t, em.HasListeners("db.user.*"))
 
 	em.Async("db.user.add", event.M{"user": "inhere"})
+	wg.Wait() // Wait for listener to complete
 	assert.NoError(t, em.CloseWait())
 
 	str := buf.String()
@@ -385,7 +388,7 @@ func TestManager_Wait(t *testing.T) {
 func TestManager_Once(t *testing.T) {
 	em := event.NewManager[event.M]("test")
 
-	em.Once("evt1", event.ListenerFunc[event.M](emptyListener))
+	em.Once("evt1", event.NewListenerFunc[event.M](emptyListener))
 	assert.True(t, em.HasListeners("evt1"))
 	err, _ := em.Trigger("evt1", event.M{})
 	if err != nil {

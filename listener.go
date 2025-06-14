@@ -1,27 +1,69 @@
 package event
 
 import (
-	"reflect"
+	"fmt"
 	"sort"
+	"sync/atomic"
 )
 
 // Listener interface
 type Listener[T any] interface {
 	Handle(e Event[T]) error
+	ID() string // Returns a unique identifier for the listener
 }
 
-// ListenerFunc func definition.
-type ListenerFunc[T any] func(e Event[T]) error
+var _ Listener[any] = (*ListenerFunc[any])(nil) // Ensure ListenerFunc implements Listener
 
-// Handle event. implements the Listener interface
-func (fn ListenerFunc[T]) Handle(e Event[T]) error {
-	return fn(e)
+// EventHandlerFunc defines the function signature for handling events
+type EventHandlerFunc[T any] func(e Event[T]) error
+
+// ListenerFunc wraps a function with an ID to implement Listener
+type ListenerFunc[T any] struct {
+	fn EventHandlerFunc[T]
+	id string
+}
+
+var listenerCounter uint64
+
+// NewListenerFunc creates a new ListenerFunc with auto-generated ID
+func NewListenerFunc[T any](fn EventHandlerFunc[T]) Listener[T] {
+	if fn == nil {
+		panic("event: listener function cannot be nil")
+	}
+	counter := atomic.AddUint64(&listenerCounter, 1)
+	return &ListenerFunc[T]{
+		fn: fn,
+		id: fmt.Sprintf("func_%d", counter),
+	}
+}
+
+// Handle implements Listener interface
+func (lf *ListenerFunc[T]) Handle(e Event[T]) error {
+	return lf.fn(e)
+}
+
+// ID returns the listener's unique identifier
+func (lf *ListenerFunc[T]) ID() string {
+	return lf.id
 }
 
 // ListenerItem storage a event listener and it's priority value.
 type ListenerItem[T any] struct {
 	Priority int
 	Listener Listener[T]
+	id       string // Stores the listener's unique ID
+}
+
+// NewListenerItem creates a new ListenerItem instance
+func NewListenerItem[T any](listener Listener[T], priority int) *ListenerItem[T] {
+	if listener == nil {
+		panic("event: listener cannot be nil")
+	}
+	return &ListenerItem[T]{
+		Priority: priority,
+		Listener: listener,
+		id:       listener.ID(),
+	}
 }
 
 /*************************************************************
@@ -31,6 +73,7 @@ type ListenerItem[T any] struct {
 // ListenerQueue storage sorted Listener instance.
 type ListenerQueue[T any] struct {
 	items []*ListenerItem[T]
+	index map[string]*ListenerItem[T] // for O(1) lookups by ID
 }
 
 // Len get items length
@@ -43,9 +86,17 @@ func (lq *ListenerQueue[T]) IsEmpty() bool {
 	return len(lq.items) == 0
 }
 
-// Push get items length
+// Push add listener item to queue
 func (lq *ListenerQueue[T]) Push(li *ListenerItem[T]) *ListenerQueue[T] {
-	lq.items = append(lq.items, li)
+	if lq.index == nil {
+		lq.index = make(map[string]*ListenerItem[T])
+	}
+
+	// Only add if not already present
+	if _, exists := lq.index[li.id]; !exists {
+		lq.items = append(lq.items, li)
+		lq.index[li.id] = li
+	}
 	return lq
 }
 
@@ -75,40 +126,31 @@ func (lq *ListenerQueue[T]) Items() []*ListenerItem[T] {
 
 // Remove a listener from the queue
 func (lq *ListenerQueue[T]) Remove(listener Listener[T]) {
-	if listener == nil {
+	if listener == nil || lq.index == nil {
 		return
 	}
 
-	compareKey := getListenCompareKey(listener)
+	targetID := listener.ID()
 
-	var newItems []*ListenerItem[T]
+	// Remove from index first
+	delete(lq.index, targetID)
+
+	// Rebuild items slice without the removed listener
+	newItems := make([]*ListenerItem[T], 0, len(lq.items)-1)
 	for _, li := range lq.items {
-		liKey := getListenCompareKey(li.Listener)
-
-		if reflect.DeepEqual(liKey, compareKey) {
-			continue // skip this listener (remove it)
+		if li.Listener != nil && li.id != targetID {
+			newItems = append(newItems, li)
 		}
-		newItems = append(newItems, li)
 	}
-
 	lq.items = newItems
 }
 
 // Clear all listeners
 func (lq *ListenerQueue[T]) Clear() {
 	lq.items = lq.items[:0]
-}
-
-// getListenCompareKey get listener compare key
-func getListenCompareKey[T any](src Listener[T]) any {
-	val := reflect.ValueOf(src)
-
-	// If it's a pointer to a struct, dereference it for comparison
-	if val.Kind() == reflect.Ptr && val.Elem().Kind() == reflect.Struct {
-		return val.Elem().Interface()
+	if lq.index != nil {
+		lq.index = make(map[string]*ListenerItem[T])
 	}
-
-	return val
 }
 
 /*************************************************************
