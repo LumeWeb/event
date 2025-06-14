@@ -268,6 +268,13 @@ type EventTToAnyAdapter[T any] struct {
 	OriginalEvent Event[T]
 }
 
+// NewEventTToAnyAdapter creates a new adapter for converting Event[T] to Event[any]
+func NewEventTToAnyAdapter[T any](original Event[T]) *EventTToAnyAdapter[T] {
+	return &EventTToAnyAdapter[T]{
+		OriginalEvent: original,
+	}
+}
+
 func (eta *EventTToAnyAdapter[T]) Name() string { return eta.OriginalEvent.Name() }
 func (eta *EventTToAnyAdapter[T]) Data() any    { return eta.OriginalEvent.Data() } // Event[T].Data() returns T, assignable to any
 func (eta *EventTToAnyAdapter[T]) SetData(d any) (Event[any], error) {
