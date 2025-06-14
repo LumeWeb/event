@@ -83,7 +83,7 @@ func (a *StdManagerAdapter[T]) FireBatch(events ...any) []error {
 	converted := make([]any, len(events))
 	for i, e := range events {
 		if evt, ok := e.(Event[T]); ok {
-			converted[i] = &EventTToAnyAdapter[T]{OriginalEvent: evt}
+			converted[i] = NewEventTToAnyAdapter(evt)
 		} else {
 			converted[i] = e
 		}
@@ -116,7 +116,7 @@ func (a *StdManagerAdapter[T]) AsyncFire(e Event[T]) {
 }
 
 func (a *StdManagerAdapter[T]) AwaitFire(e Event[T]) error {
-	return a.Mgr.AwaitFire(&EventTToAnyAdapter[T]{OriginalEvent: e})
+	return a.Mgr.AwaitFire(NewEventTToAnyAdapter(e))
 }
 
 func (a *StdManagerAdapter[T]) CloseWait() error {
@@ -248,7 +248,7 @@ func StdForType[T any]() EventManager[T] {
 func (a *StdManagerAdapter[T]) AddEventFc(name string, fc FactoryFunc[T]) {
 	a.Mgr.AddEventFc(name, func() Event[any] {
 		e := fc()
-		return &EventTToAnyAdapter[T]{OriginalEvent: e}
+		return NewEventTToAnyAdapter(e)
 	})
 }
 
@@ -376,7 +376,7 @@ func Subscribe[T any](mgr *Manager[T], sbr Subscriber[T]) {
 
 // AsyncFire simple async fire event by 'go' keywords
 func AsyncFire[T any](e Event[T]) {
-	adaptedEventForStd := &EventTToAnyAdapter[T]{OriginalEvent: e}
+	adaptedEventForStd := NewEventTToAnyAdapter(e)
 	std.AsyncFire(adaptedEventForStd)
 }
 
@@ -387,7 +387,7 @@ func Async[T any](name string, data T) {
 
 // FireAsync fire event by channel
 func FireAsync[T any](e Event[T]) {
-	adaptedEventForStd := &EventTToAnyAdapter[T]{OriginalEvent: e}
+	adaptedEventForStd := NewEventTToAnyAdapter(e)
 	std.FireAsync(adaptedEventForStd)
 }
 
@@ -439,7 +439,7 @@ func Fire[T any](name string, data T) (error, Event[T]) {
 
 // FireEvent fire listeners by Event instance.
 func FireEvent[T any](e Event[T]) error {
-	adaptedEventForStd := &EventTToAnyAdapter[T]{OriginalEvent: e}
+	adaptedEventForStd := NewEventTToAnyAdapter(e)
 	return std.FireEvent(adaptedEventForStd)
 }
 
@@ -483,7 +483,7 @@ func Reset() {
 
 // AddEvent add a pre-defined event.
 func AddEvent[T any](e Event[T]) {
-	adaptedEventForStd := &EventTToAnyAdapter[T]{OriginalEvent: e}
+	adaptedEventForStd := NewEventTToAnyAdapter(e)
 	std.AddEvent(adaptedEventForStd)
 }
 
