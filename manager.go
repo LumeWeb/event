@@ -12,7 +12,7 @@ const (
 	defaultConsumerNum = 3
 )
 
-// Manager event manager definition. for manage events and listeners
+// Manager implements EventManager interface for managing events and listeners
 type Manager[T any] struct {
 	Options
 	sync.Mutex
@@ -160,6 +160,11 @@ func (em *Manager[T]) MustFire(name string, data T) Event[T] {
 // Trigger alias of the method Fire()
 func (em *Manager[T]) Trigger(name string, data T) (error, Event[T]) {
 	return em.Fire(name, data)
+}
+
+// TriggerEvent is an alias for FireEvent()
+func (em *Manager[T]) TriggerEvent(e Event[T]) error {
+	return em.FireEvent(e)
 }
 
 // Fire trigger event by name. if not found listener, will return (nil, nil)
@@ -578,6 +583,7 @@ func (em *Manager[T]) RemoveListeners(name string) {
 }
 
 // Clear alias of the Reset()
+// Clear is an alias for Reset()
 func (em *Manager[T]) Clear() { em.Reset() }
 
 // Subscribe adds all listeners from a subscriber
@@ -621,6 +627,7 @@ func convertListener[T any](listener any) (Listener[T], int, error) {
 }
 
 // Reset the manager, clear all data.
+// Reset clears all listeners and events
 func (em *Manager[T]) Reset() {
 	// clear all listeners
 	for _, lq := range em.listeners {
