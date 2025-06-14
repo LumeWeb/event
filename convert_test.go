@@ -47,7 +47,7 @@ func TestConvertEvent(t *testing.T) {
 
 func TestConvertListener(t *testing.T) {
 	t.Run("Listener[string] to Listener[M]", func(t *testing.T) {
-		listenerM := event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+		listenerM := event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 			return nil
 		})
 		listenerString := event.ConvertListener[event.M, string](listenerM)

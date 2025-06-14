@@ -8,9 +8,6 @@ import (
 
 func BenchmarkManager_Fire_no_listener(b *testing.B) {
 	em := event.NewManager[any]("test")
-	em.On("app.up", event.ListenerFunc[any](func(e event.Event[any]) error {
-		return nil
-	}))
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -22,7 +19,7 @@ func BenchmarkManager_Fire_no_listener(b *testing.B) {
 
 func BenchmarkManager_Fire_normal(b *testing.B) {
 	em := event.NewManager[any]("test")
-	em.On("app.up", event.ListenerFunc[any](func(e event.Event[any]) error {
+	em.On("app.up", event.NewListenerFunc[any](func(e event.Event[any]) error {
 		return nil
 	}))
 
@@ -36,7 +33,7 @@ func BenchmarkManager_Fire_normal(b *testing.B) {
 
 func BenchmarkManager_Fire_wildcard(b *testing.B) {
 	em := event.NewManager[any]("test")
-	em.On("app.*", event.ListenerFunc[any](func(e event.Event[any]) error {
+	em.On("app.*", event.NewListenerFunc[any](func(e event.Event[any]) error {
 		return nil
 	}))
 

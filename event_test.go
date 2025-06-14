@@ -10,9 +10,15 @@ import (
 
 type testListener struct {
 	userData string
+	id       string
+	counter  int
+	uid      int // unique identifier
 }
 
+var testListenerCounter int
+
 func (l *testListener) Handle(e event.Event[event.M]) error {
+	l.counter++
 	if ret := e.Data()["result"]; ret != nil {
 		str := ret.(string) + fmt.Sprintf(" -> %s(%s)", e.Name(), l.userData)
 		e.SetData(event.M{"result": str})
@@ -22,16 +28,34 @@ func (l *testListener) Handle(e event.Event[event.M]) error {
 	return nil
 }
 
+func (l *testListener) ID() string {
+	if l.id == "" {
+		testListenerCounter++
+		l.uid = testListenerCounter
+		l.id = fmt.Sprintf("testListener_%s_%d", l.userData, l.uid)
+	}
+	return l.id
+}
+
+// newTestListener creates a new testListener instance
+func newTestListener(userData string) *testListener {
+	testListenerCounter++
+	return &testListener{
+		userData: userData,
+		uid:      testListenerCounter,
+	}
+}
+
 type testSubscriber struct {
 	// ooo
 }
 
 func (s *testSubscriber) SubscribedEvents() map[string]any {
 	return map[string]any{
-		"e1": event.ListenerFunc[event.M](s.e1Handler),
+		"e1": event.NewListenerFunc[event.M](s.e1Handler),
 		"e2": event.ListenerItem[event.M]{
 			Priority: event.AboveNormal,
-			Listener: event.ListenerFunc[event.M](func(e event.Event[event.M]) error {
+			Listener: event.NewListenerFunc[event.M](func(e event.Event[event.M]) error {
 				return fmt.Errorf("an error")
 			}),
 		},

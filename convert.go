@@ -80,7 +80,7 @@ func (a *eventTypeAdapter[T, M]) Set(key string, val any) Event[M] {
 
 // ConvertListener converts a Listener[M] to a Listener[T] using ConvertEvent
 func ConvertListener[M, T any](listener Listener[M]) Listener[T] {
-	return ListenerFunc[T](func(e Event[T]) error {
+	return NewListenerFunc[T](func(e Event[T]) error {
 		mEvent, err := ConvertEvent[T, M](e)
 		if err != nil {
 			return err

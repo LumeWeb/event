@@ -12,6 +12,56 @@ const (
 	defaultConsumerNum = 3
 )
 
+// ListenerCache stores mappings between original and wrapped listeners
+type ListenerCache interface {
+	// StoreWrapped stores a mapping from original to wrapped listener
+	StoreWrapped(originalID string, wrapped Listener[any])
+	// GetWrapped retrieves the wrapped listener for an original ID
+	GetWrapped(originalID string) (Listener[any], bool)
+	// DeleteWrapped removes a listener mapping by original ID
+	DeleteWrapped(originalID string)
+	// Clear removes all cached listeners
+	Clear()
+}
+
+
+type listenerCache struct {
+	mu      sync.RWMutex
+	entries map[string]Listener[any]
+}
+
+func newListenerCache() *listenerCache {
+	return &listenerCache{
+		entries: make(map[string]Listener[any]),
+	}
+}
+
+func (c *listenerCache) StoreWrapped(originalID string, wrapped Listener[any]) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries[originalID] = wrapped
+}
+
+func (c *listenerCache) GetWrapped(originalID string) (Listener[any], bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	wrapped, ok := c.entries[originalID]
+	return wrapped, ok
+}
+
+func (c *listenerCache) DeleteWrapped(originalID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, originalID)
+}
+
+func (c *listenerCache) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.entries = make(map[string]Listener[any])
+}
+
 // Manager implements EventManager interface for managing events and listeners
 type Manager[T any] struct {
 	Options
@@ -35,6 +85,21 @@ type Manager[T any] struct {
 	listeners map[string]*ListenerQueue[T]
 	// storage all event names by listened
 	listenedNames map[string]int
+
+	// adapterCache stores StdManagerAdapter instances by reflect.Type
+	adapterCache sync.Map
+	// listenerCache stores wrapped listener mappings
+	listenerCache ListenerCache
+}
+
+// GetAdapterCache returns the manager's adapter cache
+func (em *Manager[T]) GetAdapterCache() *sync.Map {
+	return &em.adapterCache
+}
+
+// GetListenerCache returns the manager's listener cache
+func (em *Manager[T]) GetListenerCache() ListenerCache {
+	return em.listenerCache
 }
 
 // NewM create event manager with type any. Alias of NewManager[any]().
@@ -52,6 +117,8 @@ func NewManager[T any](name string, fns ...OptionFn) *Manager[T] {
 		// listeners
 		listeners:     make(map[string]*ListenerQueue[T]),
 		listenedNames: make(map[string]int),
+		// listener cache
+		listenerCache: newListenerCache(),
 	}
 
 	// em.EnableLock = true
@@ -88,7 +155,7 @@ func (em *Manager[T]) Listen(name string, listener Listener[T], priority ...int)
 // Listen register a event handler/listener. trigger once.
 func (em *Manager[T]) Once(name string, listener Listener[T], priority ...int) {
 	var listenerOnce Listener[T]
-	listenerOnce = ListenerFunc[T](func(e Event[T]) error {
+	listenerOnce = NewListenerFunc[T](func(e Event[T]) error {
 		em.RemoveListener(name, listenerOnce)
 		return listener.Handle(e)
 	})
@@ -107,7 +174,7 @@ func (em *Manager[T]) On(name string, listener Listener[T], priority ...int) {
 		pv = priority[0]
 	}
 
-	em.addListenerItem(name, &ListenerItem[T]{pv, listener})
+	em.addListenerItem(name, NewListenerItem(listener, pv))
 }
 
 // AddListeners registers multiple listeners at once.
@@ -117,7 +184,11 @@ func (em *Manager[T]) AddListeners(listeners map[string]Listener[T], priority ..
 		pv = priority[0]
 	}
 	for name, listener := range listeners {
-		em.addListenerItem(name, &ListenerItem[T]{pv, listener})
+		em.addListenerItem(name, &ListenerItem[T]{
+			Priority: pv,
+			Listener: listener,
+			id:       listener.ID(),
+		})
 	}
 }
 
@@ -130,8 +201,14 @@ func (em *Manager[T]) addListenerItem(name string, li *ListenerItem[T]) {
 		panicf("event: %q - struct listener must be pointer", name)
 	}
 
-	// exists, append it.
+	// Check for existing listener with same ID
 	if lq, ok := em.listeners[name]; ok {
+		for _, existing := range lq.Items() {
+			if existing.id == li.id {
+				// Listener with same ID already exists, skip adding
+				return
+			}
+		}
 		lq.Push(li)
 	} else { // first add.
 		em.listenedNames[name] = 1
@@ -545,6 +622,11 @@ func (em *Manager[T]) ListenedNames() map[string]int {
 //	RemoveListener("", listener)
 //	RemoveListener("name", listener) // limit event name.
 func (em *Manager[T]) RemoveListener(name string, listener Listener[T]) {
+	if listener == nil {
+		return
+	}
+
+	// Normal removal
 	if name != "" {
 		if lq, ok := em.listeners[name]; ok {
 			lq.Remove(listener)
@@ -611,6 +693,8 @@ func convertListener[T any](listener any) (Listener[T], int, error) {
 		return ConvertListener[M, T](lt), Normal, nil
 	case ListenerItem[M]:
 		return ConvertListener[M, T](lt.Listener), lt.Priority, nil
+	case func(Event[T]) error:
+		return NewListenerFunc(lt), Normal, nil
 	default:
 		rt := reflect.TypeOf(listener)
 		if rt != nil && rt.Kind() == reflect.Ptr {
@@ -640,6 +724,7 @@ func (em *Manager[T]) Reset() {
 	em.wg = sync.WaitGroup{}
 
 	em.eventFc = make(map[string]FactoryFunc[T])
-	em.listeners = make(map[string]*ListenerQueue[T])
+	em.listeners = make(map[string]*ListenerQueue[T]) 
 	em.listenedNames = make(map[string]int)
+	em.listenerCache.Clear()
 }

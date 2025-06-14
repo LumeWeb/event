@@ -1,6 +1,7 @@
 package event_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/gookit/goutil/testutil/assert"
@@ -14,23 +15,39 @@ type globalTestVal struct {
 type testListenerCalc struct {
 	bind  int
 	owner *globalTestVal
+	id    string
 }
 
-func (l testListenerCalc) Handle(e event.Event[int]) error {
+func (l *testListenerCalc) Handle(e event.Event[int]) error {
 	l.owner.n++
 	l.owner.sum += e.Data() + l.bind
 	return nil
 }
 
+func (l *testListenerCalc) ID() string {
+	if l.id == "" {
+		l.id = fmt.Sprintf("testListenerCalc_%d", l.bind)
+	}
+	return l.id
+}
+
+// newTestListenerCalc creates a new testListenerCalc instance
+func newTestListenerCalc(bind int, owner *globalTestVal) *testListenerCalc {
+	return &testListenerCalc{
+		bind:  bind,
+		owner: owner,
+	}
+}
+
 func Test_RemoveListener(t *testing.T) {
 	t.Run("make func", func(t *testing.T) {
 		global := &globalTestVal{}
-		makeFn := func(a int) event.ListenerFunc[int] {
-			return func(e event.Event[int]) error {
+		makeFn := func(a int) event.Listener[int] {
+			return event.NewListenerFunc[int](func(e event.Event[int]) error {
 				global.n++
 				global.sum += e.Data() + a
 				return nil
-			}
+			})
 		}
 
 		evBus := event.NewManager[int]("")
@@ -39,9 +56,9 @@ func Test_RemoveListener(t *testing.T) {
 		f1 := makeFn(11)
 		f2 := makeFn(22)
 		f3 := makeFn(33)
-		p4 := &testListenerCalc{bind: 44, owner: global}
-		p5 := &testListenerCalc{bind: 55, owner: global}
-		p6 := &testListenerCalc{bind: 66, owner: global}
+		p4 := newTestListenerCalc(44, global)
+		p5 := newTestListenerCalc(55, global)
+		p6 := newTestListenerCalc(66, global)
 
 		evBus.On(evName, f1)
 		evBus.On(evName, f2)
@@ -75,39 +92,40 @@ func Test_RemoveListener(t *testing.T) {
 
 	t.Run("same value struct", func(t *testing.T) {
 		global := &globalTestVal{}
-		f1 := testListenerCalc{bind: 11, owner: global}
-		f2 := testListenerCalc{bind: 22, owner: global}
-		f2same := testListenerCalc{bind: 22, owner: global}
-		f2copy := f2 // testListenerCalc{bind: 22, owner: global}
+		f1 := newTestListenerCalc(11, global)
+		f2 := newTestListenerCalc(22, global)
+		f2same := newTestListenerCalc(22, global)
+		f2copy := f2 // shares same instance
 
 		evBus := event.NewManager[int]("")
 		const evName = "ev1"
-		evBus.On(evName, &f1)
-		evBus.On(evName, &f2)
-		evBus.On(evName, &f2same)
-		evBus.On(evName, &f2copy)
+		evBus.On(evName, f1)
+		evBus.On(evName, f2)
+		evBus.On(evName, f2same)
+		evBus.On(evName, f2copy)
 
 		evBus.MustFire(evName, 0)
-		assert.Equal(t, global.n, 4)
-		assert.Equal(t, global.sum, 77) // 11+22+22+22=77
+		assert.Equal(t, global.n, 2)
+		assert.Equal(t, global.sum, 33) // 11+22=33
 
-		evBus.RemoveListener(evName, &f1)
+		evBus.RemoveListener(evName, f1)
 		evBus.MustFire(evName, 0)
-		assert.Equal(t, global.n, 7)
-		assert.Equal(t, global.sum, 143) // 77+22+22+22=143
+		assert.Equal(t, global.n, 3)
+		assert.Equal(t, global.sum, 55) // 33+22=55
 
-		evBus.RemoveListener(evName, &f2)
+		evBus.RemoveListener(evName, f2)
 		evBus.MustFire(evName, 0)
-		assert.Equal(t, global.n, 7)
-		assert.Equal(t, global.sum, 143)
+		assert.Equal(t, global.n, 3)
+		assert.Equal(t, global.sum, 55)
 	})
 
 	t.Run("same func", func(t *testing.T) {
+		globalStatic = globalTestVal{} // reset before use
 		global := &globalStatic
 
-		f1 := event.ListenerFunc[int](testFuncCalc1)
-		f2 := event.ListenerFunc[int](testFuncCalc2)
-		f2same := event.ListenerFunc[int](testFuncCalc2)
+		f1 := event.NewListenerFunc[int](testFuncCalc1)
+		f2 := event.NewListenerFunc[int](testFuncCalc2)
+		f2same := event.NewListenerFunc[int](testFuncCalc2)
 		f2copy := f2
 
 		evBus := event.NewManager[int]("")
@@ -118,18 +136,18 @@ func Test_RemoveListener(t *testing.T) {
 		evBus.On(evName, f2copy)
 
 		evBus.MustFire(evName, 0)
-		assert.Equal(t, global.n, 4)
-		assert.Equal(t, global.sum, 77) // 11+22+22+22=77
+		assert.Equal(t, global.n, 3)
+		assert.Equal(t, global.sum, 55) // 11+22+22=55
 
 		evBus.RemoveListener(evName, f1)
 		evBus.MustFire(evName, 0)
-		assert.Equal(t, global.n, 7)
-		assert.Equal(t, global.sum, 143) // 77+22+22+22=143
+		assert.Equal(t, global.n, 5)
+		assert.Equal(t, global.sum, 99) // 55+22+22=99
 
 		evBus.RemoveListener(evName, f2)
 		evBus.MustFire(evName, 0)
-		assert.Equal(t, global.n, 7)
-		assert.Equal(t, global.sum, 143) //
+		assert.Equal(t, global.n, 6)
+		assert.Equal(t, global.sum, 121) // 99+22=121
 	})
 }
 
