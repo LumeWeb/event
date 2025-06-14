@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/gookit/goutil/testutil/assert"
-	"go.lumeweb.com/event"
+	"go.lumeweb.com/event/v2"
 )
 
 var emptyListener = func(e event.Event[event.M]) error {
@@ -42,7 +42,7 @@ func TestAddEvent(t *testing.T) {
 	// event.GetEvent
 	r1, ok := event.GetEvent("evt1")
 	assert.True(t, ok)
-	
+
 	// Handle case where event is wrapped in adapter
 	if adapter, ok := r1.(*event.EventTToAnyAdapter[event.M]); ok {
 		assert.Equal(t, e, adapter.OriginalEvent)

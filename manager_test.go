@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gookit/goutil/testutil/assert"
-	"go.lumeweb.com/event"
+	"go.lumeweb.com/event/v2"
 )
 
 func TestManager_FireEvent(t *testing.T) {
