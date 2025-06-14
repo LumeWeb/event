@@ -261,6 +261,99 @@ func TestOn(t *testing.T) {
 	std.RemoveListeners("n1")
 	assert.False(t, event.HasListeners("n1"))
 }
+
+func TestOnTyped(t *testing.T) {
+	defer event.Reset()
+
+	std := event.Std()
+	buf := new(bytes.Buffer)
+
+	// Register typed listener expecting string data
+	listener := event.ListenerFunc[string](func(e event.Event[string]) error {
+		buf.WriteString("got:" + e.Data())
+		return nil
+	})
+
+	// Register using OnTyped with string type
+	event.OnTyped[string](std, "str_evt", listener, event.Normal)
+	assert.Equal(t, 1, std.ListenersCount("str_evt"))
+
+	// FireTyped with matching type
+	err, evt := event.FireTyped[string](std, "str_evt", "test data")
+	assert.NoError(t, err)
+	assert.Equal(t, "got:test data", buf.String())
+	assert.Equal(t, "str_evt", evt.Name())
+	buf.Reset()
+
+	// Test type mismatch by registering a listener expecting int but firing with string
+	intListener := event.ListenerFunc[int](func(e event.Event[int]) error {
+		buf.WriteString("int-handler:" + fmt.Sprint(e.Data()))
+		return nil
+	})
+	event.OnTyped[int](std, "int_evt", intListener)
+
+	err, evt = event.FireTyped[string](std, "int_evt", "should-be-int")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "data type mismatch")
+	assert.Nil(t, evt)
+	assert.Empty(t, buf.String())
+}
+
+func TestRemoveTypedListener(t *testing.T) {
+	defer event.Reset()
+
+	std := event.Std()
+	buf := new(bytes.Buffer)
+
+	// Register typed listener expecting string data
+	listener := event.ListenerFunc[string](func(e event.Event[string]) error {
+		buf.WriteString("got:" + e.Data())
+		return nil
+	})
+
+	// Register using OnTyped
+	event.OnTyped[string](std, "str_evt", listener, event.Normal)
+	assert.Equal(t, 1, std.ListenersCount("str_evt"))
+
+	// Remove the listener
+	event.RemoveTypedListener[string](std, "str_evt", listener)
+	assert.Equal(t, 0, std.ListenersCount("str_evt"))
+
+	// FireTyped - should not trigger listener
+	err, evt := event.FireTyped[string](std, "str_evt", "test data")
+	assert.NoError(t, err)
+	assert.Nil(t, evt)
+	assert.Empty(t, buf.String())
+}
+
+func TestFireTyped(t *testing.T) {
+	defer event.Reset()
+
+	std := event.Std()
+	buf := new(bytes.Buffer)
+
+	// Register listener expecting string data
+	listener := event.ListenerFunc[string](func(e event.Event[string]) error {
+		buf.WriteString("got:" + e.Data())
+		return nil
+	})
+
+	event.OnTyped[string](std, "str_evt", listener)
+
+	// FireTyped with matching type
+	err, evt := event.FireTyped[string](std, "str_evt", "test data")
+	assert.NoError(t, err)
+	assert.Equal(t, "got:test data", buf.String())
+	assert.Equal(t, "str_evt", evt.Name())
+	buf.Reset()
+
+	// FireTyped with mismatched type - should fail
+	err, evt = event.FireTyped[string](std, "str_evt", "123")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "data type mismatch")
+	assert.Nil(t, evt)
+	assert.Empty(t, buf.String())
+}
 func TestOnce(t *testing.T) {
 	defer event.Reset()
 

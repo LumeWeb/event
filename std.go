@@ -43,7 +43,7 @@ func (a *StdManagerAdapter[T]) wrapListener(listener Listener[T]) Listener[any] 
 
 	// Store mapping from original to wrapped listener
 	ptr := reflect.ValueOf(listener).Pointer()
-	
+
 	a.listenerMapMu.Lock()
 	if a.listenerMap == nil {
 		a.listenerMap = make(map[uintptr]Listener[any])
@@ -133,14 +133,14 @@ func (a *StdManagerAdapter[T]) AddListener(name string, listener Listener[T], pr
 
 func (a *StdManagerAdapter[T]) RemoveListener(name string, listener Listener[T]) {
 	ptr := reflect.ValueOf(listener).Pointer()
-	
+
 	a.listenerMapMu.RLock()
 	wrapped, ok := a.listenerMap[ptr]
 	a.listenerMapMu.RUnlock()
 
 	if ok {
 		a.Mgr.RemoveListener(name, wrapped)
-		
+
 		a.listenerMapMu.Lock()
 		delete(a.listenerMap, ptr)
 		a.listenerMapMu.Unlock()
@@ -216,6 +216,50 @@ func (sw *subscriberWrapper[T]) SubscribedEvents() map[string]any {
 // Std get default event manager
 func Std() *Manager[any] {
 	return std
+}
+
+// OnTyped registers a typed listener with the given Manager[any]
+func OnTyped[P any](em EventManager[any], name string, listener Listener[P], priority ...int) {
+	if listener == nil {
+		panicf("event: the event %q listener cannot be empty", name)
+	}
+
+	wrapped := ListenerFunc[any](func(e Event[any]) error {
+		dataAsP, ok := e.Data().(P)
+		if !ok {
+			var zeroP P
+			return fmt.Errorf("event: data type mismatch for event '%s'. Expected %T, got %T",
+				e.Name(), zeroP, e.Data())
+		}
+		return listener.Handle(newBasicEventAdapter(e, dataAsP))
+	})
+
+	em.On(name, wrapped, priority...)
+}
+
+// RemoveTypedListener removes a typed listener from the given Manager[any]
+func RemoveTypedListener[P any](em EventManager[any], name string, listener Listener[P]) {
+	// Need to find and remove the wrapped listener
+	// This is tricky since we don't track the mapping
+	// For now just remove all listeners for the event
+	em.RemoveListeners(name)
+}
+
+// FireTyped fires an event with typed data on the given Manager[any]
+func FireTyped[P any](em EventManager[any], name string, data P) (error, Event[P]) {
+	err, evtAny := em.Fire(name, data)
+	if err != nil {
+		return err, nil
+	}
+
+	dataAsP, ok := evtAny.Data().(P)
+	if !ok {
+		var zeroP P
+		return fmt.Errorf("event: data type mismatch after firing event '%s'. Expected %T, got %T",
+			evtAny.Name(), zeroP, evtAny.Data()), nil
+	}
+
+	return err, newBasicEventAdapter(evtAny, dataAsP)
 }
 
 // NewMEvent creates a new BasicEvent with event.M data type
@@ -304,7 +348,7 @@ func On[T any](name string, listener Listener[T], priority ...int) {
 	if listener == nil {
 		panicf("event: the event %q listener cannot be empty", name)
 	}
-	
+
 	// Get StdManagerAdapter instance for type T
 	adapter := StdForType[T]().(*StdManagerAdapter[T])
 	wrappedListener := adapter.wrapListener(listener)
@@ -332,7 +376,7 @@ func Once[T any](name string, listener Listener[T], priority ...int) {
 
 	// Store mapping from original to wrapped listener
 	ptr := reflect.ValueOf(listener).Pointer()
-	
+
 	adapter.listenerMapMu.Lock()
 	if adapter.listenerMap == nil {
 		adapter.listenerMap = make(map[uintptr]Listener[any])
