@@ -34,17 +34,51 @@ Lightweight event management, dispatch tool library implemented by Go
 go get github.com/gookit/event
 ```
 
-## Main method
+## Core Interfaces
 
-- `On/Listen(name string, listener Listener, priority ...int)` Register event listener
-- `Subscribe/AddSubscriber(sbr Subscriber)`  Subscribe to support registration of multiple event listeners
-- `Trigger/Fire(name string, params M) (error, Event)` Trigger event by name and params
-- `MustTrigger/MustFire(name string, params M) Event`   Trigger event, there will be panic if there is an error
-- `FireEvent(e Event) (err error)`    Trigger an event based on a given event instance
-- `FireBatch(es ...interface{}) (ers []error)` Trigger multiple events at once
-- `Async/FireC(name string, params M)` Push event to `chan`, asynchronous consumption processing
-- `FireAsync(e Event)`  Push event to `chan`, asynchronous consumption processing
-- `AsyncFire(e Event)`  Async fire event by 'go' keywords
+The event system is organized into several focused interfaces that provide clear separation of concerns:
+
+### EventDispatcher
+- `On/Listen()` - Register event listeners
+- `Once()` - Register one-time listeners  
+- `Fire/Trigger()` - Trigger events
+- `MustFire/MustTrigger()` - Trigger events with panic on error
+
+### EventBatchManager  
+- `FireBatch()` - Trigger multiple events
+- `FireEvent/TriggerEvent()` - Trigger pre-built events
+
+### AsyncEventManager
+- `Async/FireC()` - Async trigger via channel
+- `FireAsync()` - Async trigger pre-built events
+- `AsyncFire()` - Async via goroutine
+- `AwaitFire()` - Async with wait
+- `Close/CloseWait()` - Manage async channel
+
+### ListenerManager
+- `AddListener()` - Register listeners
+- `RemoveListener()` - Remove listeners
+- `HasListeners()` - Check for listeners
+- `Subscribe()` - Bulk register listeners
+
+### EventDefinitionManager
+- `AddEvent()` - Register event instances  
+- `Get/HasEvent()` - Query events  
+- `RemoveEvent()` - Remove events  
+
+### EventManager (Composite Interface)
+The `EventManager` interface combines all core event management capabilities into a single unified API by embedding:  
+
+- `EventDispatcher` - Basic event triggering  
+- `EventBatchManager` - Batch event operations  
+- `AsyncEventManager` - Asynchronous event handling  
+- `ListenerManager` - Listener management  
+- `EventDefinitionManager` - Event definition handling  
+
+This provides the complete API surface for event management in one interface. Key additional methods:  
+
+- `Reset()` - Clear all listeners and events
+- Full access to all methods from embedded interfaces  
 
 ## Quick start
 
