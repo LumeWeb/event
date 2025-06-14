@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/gookit/goutil/testutil/assert"
-	"go.lumeweb.com/event"
+	"go.lumeweb.com/event/v2"
 )
 
 type globalTestVal struct {

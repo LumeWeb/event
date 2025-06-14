@@ -3,7 +3,7 @@ package event_test
 import (
 	"testing"
 
-	"go.lumeweb.com/event"
+	"go.lumeweb.com/event/v2"
 )
 
 func BenchmarkManager_Fire_no_listener(b *testing.B) {

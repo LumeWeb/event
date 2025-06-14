@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/gookit/goutil/testutil/assert"
-	"go.lumeweb.com/event"
+	"go.lumeweb.com/event/v2"
 )
 
 type testNotify struct{}

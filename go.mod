@@ -1,4 +1,4 @@
-module go.lumeweb.com/event
+module go.lumeweb.com/event/v2
 
 go 1.19
 
